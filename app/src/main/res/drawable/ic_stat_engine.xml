@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Notification small icons must be a white silhouette on transparent;
+         the system applies its own tint. Do not reference AppCompat theme
+         attrs here (this project has no AppCompat theme), and do not use
+         fillColor on an open path (it has no area, so it renders nothing). -->
+    <path
+        android:pathData="M3,12h2.5l2,-6l3,12l3,-9l2,3h5.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>
