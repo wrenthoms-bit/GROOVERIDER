@@ -54,11 +54,12 @@ class SourceRepository(context: Context) {
         return record
     }
 
-    /** Load a stored source into the engine (resampled to the engine rate). */
+    /** Load a stored source into the engine (resampled to the engine rate).
+     * False if the source is missing on disk, or the native engine hasn't
+     * been created yet (loadSource returns 0 frames in that case). */
     suspend fun loadIntoEngine(hash: String): Boolean = withContext(Dispatchers.IO) {
         val audio = store.readPcm(hash) ?: return@withContext false
-        GrooveriderEngine.loadSource(audio.samples, audio.channels, audio.sampleRate)
-        true
+        GrooveriderEngine.loadSource(audio.samples, audio.channels, audio.sampleRate) > 0
     }
 
     fun delete(hash: String) = store.delete(hash)

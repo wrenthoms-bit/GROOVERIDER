@@ -25,6 +25,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.delrogue.grooverider.ui.HelpButton
+import com.delrogue.grooverider.ui.HelpDialog
 
 @Composable
 fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel()) {
@@ -49,8 +51,13 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) vm.toggleMic() }
 
+    var showHelp by remember { mutableStateOf(false) }
+
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Sources", style = MaterialTheme.typography.headlineMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Sources", style = MaterialTheme.typography.headlineMedium)
+            HelpButton(onClick = { showHelp = true })
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = { picker.launch(arrayOf("audio/*")) }, enabled = !busy && !recording) {
@@ -121,6 +128,17 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
                 }
             }
         }
+    }
+
+    if (showHelp) {
+        HelpDialog(
+            title = "Sources",
+            body = "Import audio from your device, or record from the mic. " +
+                "Tap a source to select it -- its waveform appears above with " +
+                "drag handles to trim the in/out points. This trimmed region " +
+                "is what the grain engine reads from on the Cloud screen.",
+            onDismiss = { showHelp = false },
+        )
     }
 }
 

@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,8 +52,10 @@ fun DebugPanelScreen(
     val config by vm.config.collectAsStateWithLifecycle()
     val masterSeed by vm.masterSeed.collectAsStateWithLifecycle()
     val seeds by vm.seeds.collectAsStateWithLifecycle()
+    val seedLoadError by vm.seedLoadError.collectAsStateWithLifecycle()
     val selectedSource by sourceVm.selected.collectAsStateWithLifecycle()
 
+    var showHelp by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     var xrunsAtStart by remember { mutableLongStateOf(-1L) }
 
@@ -78,7 +81,14 @@ fun DebugPanelScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Text("GROOVERIDER", style = MaterialTheme.typography.headlineMedium)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("GROOVERIDER", style = MaterialTheme.typography.headlineMedium)
+            HelpButton(onClick = { showHelp = true })
+        }
         Text(
             "M0 — Skeleton & Signal Path",
             style = MaterialTheme.typography.labelLarge,
@@ -170,7 +180,16 @@ fun DebugPanelScreen(
         // ---- grain engine (M2) ---------------------------------------------
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionLabel("Grain engine")
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SectionLabel("Grain engine")
+                    OutlinedButton(onClick = { vm.recallGrainDefaults() }, enabled = meters.running) {
+                        Text("Recall default")
+                    }
+                }
                 Text(
                     "Load a source from the Sources tab first -- the grain cloud " +
                         "reads whatever is currently loaded for preview.",
@@ -275,6 +294,9 @@ fun DebugPanelScreen(
                 if (seeds.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
                     SectionLabel("Library (${seeds.size})")
+                    seedLoadError?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                     seeds.forEach { seed ->
                         Row(
                             Modifier.fillMaxWidth(),
@@ -297,6 +319,18 @@ fun DebugPanelScreen(
                 "parameter smoothing is not doing its job (spec 2.8).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (showHelp) {
+        HelpDialog(
+            title = "Engine",
+            body = "This is the engine's raw control panel. Hit Start engine, " +
+                "then pick a source from the Sources tab. The Grain engine " +
+                "sliders shape the sound -- Recall default resets them to a " +
+                "neutral starting point. Most performance happens on the " +
+                "Cloud tab; this screen is for fine control and diagnostics.",
+            onDismiss = { showHelp = false },
         )
     }
 }

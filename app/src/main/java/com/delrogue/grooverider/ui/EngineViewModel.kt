@@ -12,6 +12,7 @@ import com.delrogue.grooverider.seed.SeedNaming
 import java.io.File
 import com.delrogue.grooverider.seed.Seed
 import com.delrogue.grooverider.seed.SeedRepository
+import com.delrogue.grooverider.source.SourceRepository
 import com.delrogue.grooverider.telemetry.XrunTelemetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -79,10 +80,14 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     val grain: StateFlow<GrainState> = _grain.asStateFlow()
 
     private val seedRepo = SeedRepository(app)
+    private val sourceRepo = SourceRepository(app)
     private val _masterSeed = MutableStateFlow(1L)
     val masterSeed: StateFlow<Long> = _masterSeed.asStateFlow()
     val seeds: StateFlow<List<Seed>> = seedRepo.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _seedLoadError = MutableStateFlow<String?>(null)
+    val seedLoadError: StateFlow<String?> = _seedLoadError.asStateFlow()
 
     private val _config = MutableStateFlow("stream closed")
     val config: StateFlow<String> = _config.asStateFlow()
@@ -223,6 +228,26 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setChaosRate(v: Float) { _grain.value = _grain.value.copy(chaosRate = v); GrooveriderEngine.setChaosRate(v) }
     fun setChaosEnabled(on: Boolean) { _grain.value = _grain.value.copy(chaosEnabled = on); GrooveriderEngine.setChaosEnabled(on) }
 
+    /** Resets the grain/output controls to the neutral recall-default preset. */
+    fun recallGrainDefaults() {
+        _grain.value = _grain.value.copy(
+            density = 0.5f,
+            timingJitter = 0.0f,
+            grainSizeMs = 2000f,
+            sizeJitter = 0.0f,
+            position = 0.0f,
+            sprayMs = 0.0f,
+            drift = 0.0f,
+            pitchSt = 0.0f,
+            pitchSpraySt = 0.0f,
+            reverseProb = 0.0f,
+            spread = 0.0f,
+            outputWidth = 1.0f,
+            outputGain = 0.9f,
+        )
+        applyGrainToEngine()
+    }
+
     private fun applyGrainToEngine() {
         val g = _grain.value
         GrooveriderEngine.setGrainDensity(g.density)
@@ -287,17 +312,18 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         _macroLocks.value = _macroLocks.value.let { if (name in it) it - name else it + name }
     }
 
-    /** The XY pad: X -> position, Y -> TEXTURE macro (spec 5.1, 5.3). */
-    fun onPadDrag(x01: Float, y01: Float) {
+    /** Drag on the fullscreen cloud canvas: X -> position, Y -> pitch centre --
+     * matches the grain particles' own plot (Y = pitch, up = transposed up). */
+    fun onCanvasDrag(x01: Float, y01: Float) {
         setGrainPosition(x01.coerceIn(0f, 1f))
-        setMacroTexture(y01.coerceIn(0f, 1f))
+        setGrainPitchSt((y01.coerceIn(0f, 1f) - 0.5f) * 48f)
     }
 
-    fun onPadPinch(spread01Delta: Float) {
+    fun onCanvasPinch(spread01Delta: Float) {
         setMacroSpace((_macro.value.space + spread01Delta).coerceIn(0f, 1f))
     }
 
-    fun onPadRotate(driftDelta: Float) {
+    fun onCanvasRotate(driftDelta: Float) {
         if (_frozen.value) return   // frozen means drift stays at 0
         setGrainDrift((_grain.value.drift + driftDelta).coerceIn(-2f, 2f))
     }
@@ -418,11 +444,32 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Loads a seed's own source + params into the engine and plays it --
+     * the engine is always-on once running, so this is also how auditioning
+     * works. Ensures the engine is actually running first: without this a
+     * seed loaded before the Engine tab/service has ever started would
+     * silently do nothing (every native setter no-ops on a null engine). */
     fun loadSeed(seed: Seed) {
-        val g = seedRepo.apply(seed)
-        _grain.value = g
-        _masterSeed.value = seed.masterSeed
+        _seedLoadError.value = null
+        AudioEngineService.start(getApplication())
+        viewModelScope.launch {
+            var attempts = 0
+            while (!sourceRepo.loadIntoEngine(seed.sourceHash)) {
+                attempts++
+                if (attempts >= 20) {
+                    _seedLoadError.value = "Couldn't load this seed's source -- " +
+                        "it may have been deleted or renamed."
+                    return@launch
+                }
+                delay(50)
+            }
+            val g = seedRepo.apply(seed)
+            _grain.value = g
+            _masterSeed.value = seed.masterSeed
+        }
     }
+
+    fun dismissSeedLoadError() { _seedLoadError.value = null }
 
     fun deleteSeed(seed: Seed) {
         viewModelScope.launch { seedRepo.delete(seed) }

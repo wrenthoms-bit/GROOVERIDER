@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as lazyRowItems
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +45,8 @@ import com.delrogue.grooverider.seed.MutableParam
 import com.delrogue.grooverider.seed.Seed
 import com.delrogue.grooverider.source.SourceRecord
 import com.delrogue.grooverider.ui.EngineViewModel
+import com.delrogue.grooverider.ui.HelpButton
+import com.delrogue.grooverider.ui.HelpDialog
 import com.delrogue.grooverider.ui.source.SourceViewModel
 import java.io.File
 
@@ -66,8 +69,14 @@ fun SeedLibraryScreen(
     val parent by vm.parent.collectAsStateWithLifecycle()
     val mutationCandidates by vm.mutationCandidates.collectAsStateWithLifecycle()
     val sources by sourceVm.sources.collectAsStateWithLifecycle()
+    val seedLoadError by engineVm.seedLoadError.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pickingSourceFor by remember { mutableStateOf<Seed?>(null) }
+    var showHelp by remember { mutableStateOf(false) }
+
+    // Selecting a seed anywhere in the library also loads + plays it --
+    // with hundreds of seeds saved, browsing has to double as auditioning.
+    val selectAndPlay: (Seed) -> Unit = { seed -> vm.select(seed); engineVm.loadSeed(seed) }
 
     Column(modifier.fillMaxSize().background(Color(0xFF0A0A0C)).padding(12.dp)) {
         OutlinedTextField(
@@ -77,14 +86,25 @@ fun SeedLibraryScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer4dp()
-        Text("${seeds.size} seeds", color = Color(0xFF9AA0A6), style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("${seeds.size} seeds", color = Color(0xFF9AA0A6), style = MaterialTheme.typography.bodySmall)
+            HelpButton(onClick = { showHelp = true })
+        }
+        seedLoadError?.let {
+            Text(it, color = Color(0xFFE0574D), style = MaterialTheme.typography.bodySmall)
+        }
 
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 120.dp),
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
             items(seeds, key = { it.id }) { seed ->
-                SeedCard(seed = seed, onClick = { vm.select(seed) }, onFavourite = { vm.toggleFavourite(seed) })
+                SeedCard(
+                    seed = seed,
+                    isSelected = seed.id == selected?.id,
+                    onClick = { selectAndPlay(seed) },
+                    onFavourite = { vm.toggleFavourite(seed) },
+                )
             }
         }
 
@@ -95,7 +115,8 @@ fun SeedLibraryScreen(
                 children = children,
                 mutationCandidates = mutationCandidates,
                 onClose = { vm.select(null) },
-                onSelectSeed = vm::select,
+                onSelectSeed = selectAndPlay,
+                onPreview = { engineVm.loadSeed(it) },
                 onLoad = { engineVm.loadSeed(it) },
                 onFavourite = { vm.toggleFavourite(it) },
                 onDelete = { vm.delete(it) },
@@ -120,6 +141,18 @@ fun SeedLibraryScreen(
                 onDismiss = { pickingSourceFor = null },
             )
         }
+    }
+
+    if (showHelp) {
+        HelpDialog(
+            title = "Library",
+            body = "Tap any seed to load and hear it. Mutate generates six " +
+                "variations -- tap each to preview, tap ✓ to keep your " +
+                "favourite. Tap a locked-param chip to protect it from future " +
+                "mutation. Favourite, delete, export, or re-point a seed at a " +
+                "different source from its detail view.",
+            onDismiss = { showHelp = false },
+        )
     }
 }
 
@@ -149,8 +182,12 @@ private fun SourcePickerDialog(sources: List<SourceRecord>, onPick: (SourceRecor
 private fun Spacer4dp() = Box(Modifier.height(4.dp))
 
 @Composable
-private fun SeedCard(seed: Seed, onClick: () -> Unit, onFavourite: () -> Unit) {
-    Card(Modifier.padding(4.dp).clickable(onClick = onClick)) {
+private fun SeedCard(seed: Seed, isSelected: Boolean, onClick: () -> Unit, onFavourite: () -> Unit) {
+    Card(
+        Modifier.padding(4.dp).clickable(onClick = onClick),
+        colors = if (isSelected) CardDefaults.cardColors(containerColor = Color(0xFF2A3A42))
+                 else CardDefaults.cardColors(),
+    ) {
         Column(Modifier.padding(8.dp)) {
             ThumbnailCanvas(seed.waveformThumb, Modifier.fillMaxWidth().height(40.dp))
             Row(
@@ -193,6 +230,7 @@ private fun SeedDetail(
     mutationCandidates: List<Seed>,
     onClose: () -> Unit,
     onSelectSeed: (Seed) -> Unit,
+    onPreview: (Seed) -> Unit,
     onLoad: (Seed) -> Unit,
     onFavourite: (Seed) -> Unit,
     onDelete: (Seed) -> Unit,
@@ -279,14 +317,42 @@ private fun SeedDetail(
         }
 
         if (mutationCandidates.isNotEmpty()) {
-            Text("Six children -- audition and pick", color = Color(0xFF9AA0A6), style = MaterialTheme.typography.labelSmall)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Six children -- tap to preview, ✓ to keep",
+                    color = Color(0xFF9AA0A6),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    "✕",
+                    color = Color(0xFF6A6A70),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.clickable(onClick = onDismissMutations),
+                )
+            }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 lazyRowItems(mutationCandidates, key = { it.id }) { child ->
-                    Card(Modifier.size(100.dp).clickable { onSelectSeed(child); onDismissMutations() }) {
-                        Column(Modifier.padding(6.dp)) {
-                            ThumbnailCanvas(child.waveformThumb, Modifier.fillMaxWidth().height(28.dp))
-                            Text(child.name, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                    Box(Modifier.size(100.dp)) {
+                        Card(Modifier.fillMaxSize().clickable { onPreview(child) }) {
+                            Column(Modifier.padding(6.dp)) {
+                                ThumbnailCanvas(child.waveformThumb, Modifier.fillMaxWidth().height(28.dp))
+                                Text(child.name, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                            }
                         }
+                        Text(
+                            "✓",
+                            color = Color(0xFF7FE0C8),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .background(Color(0xFF17171B), androidx.compose.foundation.shape.CircleShape)
+                                .clickable { onSelectSeed(child) }
+                                .padding(4.dp),
+                        )
                     }
                 }
             }
