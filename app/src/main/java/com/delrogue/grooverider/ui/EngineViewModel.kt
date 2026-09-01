@@ -452,6 +452,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun loadSeed(seed: Seed) {
         _seedLoadError.value = null
         AudioEngineService.start(getApplication())
+        startPolling()
         viewModelScope.launch {
             var attempts = 0
             while (!sourceRepo.loadIntoEngine(seed.sourceHash)) {
