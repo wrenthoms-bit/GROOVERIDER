@@ -13,3 +13,13 @@ A browser build of the Grooverider granular texture engine. It runs the **same C
 4. **Render 8s WAV** exports a 32-bit float file to your downloads.
 
 `index.html` is fully self-contained (the wasm is embedded as base64). To rebuild after changing the core, run `../core/reinline.sh`.
+
+## MIDI control (Akai MPK Mini etc.)
+Chrome or Edge only (Web MIDI), and the page must be on **https or localhost** — MIDI won't arm from a file opened directly.
+
+1. Plug in the MPK Mini, click **🎹 MIDI**, allow access.
+2. Click **Learn**, click a control's **badge** (or a Play / Re-roll button), then move the matching knob (or hit a pad) — it binds instantly.
+3. Turn Learn off. Knobs now drive the mapped parameters live. Bindings are saved in the browser.
+
+The MPK's knobs send absolute CC, so they map 1:1 to a parameter's range. Re-binding a control replaces its old CC.
+
