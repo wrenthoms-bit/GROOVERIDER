@@ -20,3 +20,6 @@ local.properties
 
 # scratch payload, not project source
 /_gemini_scratch
+
+# original sample master; the web copy lives in docs/samples/
+/big-river-SOUND.wav

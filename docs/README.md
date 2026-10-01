@@ -8,11 +8,16 @@ A browser build of the Grooverider granular texture engine. It runs the **same C
 
 ## Use it
 1. Click once to enable audio (browser autoplay rule).
-2. **Load demo tone**, **Import audio** (drag-drop works too), or **Record mic**.
+2. Pick a source from **Samples…**, **Import audio** (drag-drop works too), or **Record mic**.
 3. **Play**, then move the macros (TEXTURE / DRIFT / PITCH / SPACE) and grain controls.
-4. **Render 8s WAV** exports a 32-bit float file to your downloads.
+4. **Render WAV** exports a 32-bit float file to your downloads.
 
-`index.html` is fully self-contained (the wasm is embedded as base64). To rebuild after changing the core, run `../core/reinline.sh`.
+`index.html` is self-contained for the engine (the wasm is embedded as base64). To rebuild after changing the core, run `../core/reinline.sh`.
+
+## Sample library
+The **Samples…** menu lists built-in sources. The demo pad is synthesised in the page; the rest are audio files in `samples/`, fetched only when chosen (so they need the page served over http(s), not opened as a file).
+
+To add one: put a compressed copy in `samples/` and add a line to the `SAMPLES` array in `index.html`. Sources are capped at 60 s. On macOS, `afconvert -f m4af -d aac -b 256000 in.wav samples/name.m4a` makes a suitable file.
 
 ## MIDI control (Akai MPK Mini etc.)
 Chrome or Edge only (Web MIDI), and the page must be on **https or localhost** — MIDI won't arm from a file opened directly.

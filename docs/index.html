@@ -53,6 +53,8 @@ button.primary:hover:not(:disabled){color:#0B0B0A; border-color:#F6C886; box-sha
 button.on{background:var(--cyan); color:#041012; border-color:var(--cyan); box-shadow:0 0 22px rgba(98,208,220,.3)}
 button.on:hover:not(:disabled){color:#041012}
 button.mini{padding:6px 11px; font-size:11px}
+select.pill{width:auto; font:700 11px var(--sans); border-radius:999px; padding:6px 11px; background:var(--glass)}
+select.pill:hover{border-color:var(--cyan)}
 #midiStatus{font-family:var(--mono); font-size:9.5px; color:var(--tx2); letter-spacing:.08em; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
 /* ---- stage (the cloud is the hero; the canvas sits behind everything) ---- */
@@ -179,7 +181,7 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
   <div class="brand">GROOVE<b>RIDER</b></div>
   <div class="tag">Observatory · granular field instrument</div>
   <div class="sp"></div>
-  <button id="loadDemo" class="mini">Demo source</button>
+  <select id="library" class="pill" aria-label="Sample library" title="Sample library"></select>
   <button id="loadFile" class="mini">Import audio</button>
   <button id="mic" class="mini">Record mic</button>
   <button id="midi" class="mini">MIDI</button>
@@ -966,7 +968,28 @@ async function begin(){
 }
 $('enter').addEventListener('click', begin);
 $('play').addEventListener('click', ()=>setPlaying(!playing));
-$('loadDemo').addEventListener('click', async ()=>{ openGate(); try{ await makeDemo(); setStatus('Demo source loaded.'); }catch(e){} });
+// ---- sample library ----
+// Built-in sources. Entries with a `file` are fetched on demand from docs/samples/ (kept out of
+// this page so it stays small); to add one, drop the audio file there and add a line here.
+const SAMPLES = [
+  { name:'Demo pad (C)' },                                    // synthesised in makeDemo()
+  { name:'Big River', file:'samples/big-river.m4a' },
+];
+$('library').innerHTML = '<option value="">Samples…</option>' + SAMPLES.map((s,i)=>'<option value="'+i+'">'+s.name+'</option>').join('');
+async function loadSample(i){
+  const s = SAMPLES[i]; if (!s) return;
+  openGate();
+  try {
+    if (!s.file){ await makeDemo(); setStatus('Loaded '+s.name+'.'); return; }
+    setStatus('Loading '+s.name+' …');
+    const res = await fetch(s.file); if (!res.ok) throw new Error('HTTP '+res.status);
+    await decodeArrayBuffer(await res.arrayBuffer(), s.name);
+    setStatus('Loaded '+s.name+'.');
+  } catch(err){
+    setStatus('Could not load '+s.name+(location.protocol==='file:' ? ' — library samples need the page served over http(s), not opened as a file.' : ' ('+(err && err.message || err)+').'));
+  }
+}
+$('library').addEventListener('change', ()=>{ const v = $('library').value; $('library').value = ''; if (v !== '') loadSample(+v); });
 $('loadFile').addEventListener('click', ()=>$('file').click());
 async function loadFile(f){
   if (!f) return; openGate(); setStatus('Decoding '+f.name+' …');
