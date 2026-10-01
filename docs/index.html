@@ -74,7 +74,27 @@ select.pill:hover{border-color:var(--cyan)}
 .gate.gone{opacity:0; pointer-events:none}
 .gate button{font-size:14px; font-weight:400; letter-spacing:.2em; text-transform:uppercase; padding:15px 30px; background:rgba(3,5,6,.5); border-color:rgba(232,168,87,.55); color:#F3DDB9; box-shadow:0 0 50px rgba(232,168,87,.14), inset 0 0 22px rgba(232,168,87,.07)}
 .gate button:hover{border-color:var(--amber); color:#FFF1D8; box-shadow:0 0 70px rgba(232,168,87,.3), inset 0 0 22px rgba(232,168,87,.12)}
-.gate span{font:10px var(--mono); letter-spacing:.16em; color:var(--tx3); text-transform:uppercase}
+.gate span{font:10px var(--mono); letter-spacing:.16em; color:var(--tx3); text-transform:uppercase; text-align:center; padding:0 16px}
+.gate span.warn{color:var(--amber)}
+.gate button.linkbtn{font:10px var(--mono); letter-spacing:.16em; padding:6px 12px; border-color:var(--line2); color:var(--tx2); box-shadow:none; background:rgba(3,5,6,.4)}
+.gate button.linkbtn:hover{border-color:var(--cyan); color:#BDF1F4; box-shadow:none}
+
+/* ---- help ---- */
+.help{position:fixed; inset:0; z-index:8; display:flex; align-items:center; justify-content:center; padding:16px;
+  background:rgba(2,4,5,.66); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  opacity:0; visibility:hidden; transition:opacity .28s var(--ease), visibility 0s linear .28s}
+.help.open{opacity:1; visibility:visible; transition:opacity .28s var(--ease)}
+.helpbox{width:100%; max-width:900px; max-height:100%; overflow-y:auto; border:1px solid var(--line2); border-radius:16px;
+  background:rgba(5,10,12,.94); padding:20px 24px 22px; box-shadow:0 30px 90px rgba(0,0,0,.6)}
+.helphead{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
+.helphead h2{font-size:22px; font-weight:300; color:#EFF6F3}
+.helpgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(245px,1fr)); gap:16px 28px}
+.helpgrid h3{font:9px var(--mono); letter-spacing:.2em; text-transform:uppercase; color:var(--amber); border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:8px}
+.helpgrid ul{list-style:none; display:grid; gap:7px}
+.helpgrid li{font-size:12.5px; line-height:1.5; color:var(--tx2)}
+.helpgrid li b{color:var(--tx); font-weight:700}
+.helpgrid li.flag{color:#F3DDB9; border-left:2px solid var(--amber); padding-left:9px}
+.helpgrid kbd{font:10px var(--mono); color:var(--cyan); border:1px solid var(--line2); border-radius:4px; padding:0 4px}
 .dropzone{position:absolute; inset:14px; display:none; align-items:center; justify-content:center; font-size:15px; color:#BDF1F4; border:1px dashed var(--cyan); border-radius:14px; background:rgba(98,208,220,.06); pointer-events:none}
 .dropzone.hot{display:flex}
 
@@ -159,7 +179,9 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
 
 @media (max-width:900px), (max-height:520px){
   body{overflow:auto; display:block}
-  .stage{height:46vh; min-height:250px}
+  .stage{height:58vh; min-height:480px}
+  .gate{justify-content:flex-end; padding-bottom:26px}
+  .ringctl small{white-space:normal; text-align:center; line-height:1.3}
   .dock{grid-template-columns:1fr; height:auto}
   .panel{min-height:176px}
   .rings{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -190,6 +212,7 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
   <button id="play" class="primary" disabled>▶ Play</button>
   <button id="export" disabled>Render WAV</button>
   <button id="detailBtn" class="mini" aria-expanded="false" aria-controls="detail">Detail</button>
+  <button id="helpBtn" class="mini" aria-haspopup="dialog" title="How to play, and what to check if you hear nothing">? Help</button>
   <input id="file" type="file" accept="audio/*" hidden>
 </header>
 
@@ -204,6 +227,8 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
   <div class="gate" id="gate">
     <button id="enter">Enter the Observatory</button>
     <span>starts audio · headphones recommended</span>
+    <span class="warn" id="iosTip" hidden>iPhone / iPad: switch off silent mode, or you won’t hear anything</span>
+    <button class="linkbtn" id="gateHelp">How to play</button>
   </div>
   <div class="dropzone" id="dropzone">Drop audio to seed the cloud</div>
   <div id="status" role="status" aria-live="polite"></div>
@@ -251,6 +276,70 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
   <div class="hint">Grains come from the shared C++ core (WebAssembly) — the same engine as the Android app. Chaos, scale-lock, reverb and shimmer are a web layer around it. Key is relative to the source’s own pitch (the demo source is in C).</div>
   <div class="footer">Grooverider · Delrogue · one C++ core, phone + browser</div>
 </aside>
+
+<div class="help" id="help" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+  <div class="helpbox">
+    <div class="helphead"><h2 id="helpTitle">How to play</h2><button id="helpClose" class="mini">Close</button></div>
+    <div class="helpgrid">
+      <section>
+        <h3>If you hear nothing</h3>
+        <ul>
+          <li><b>Tap Enter the Observatory (or Play) first.</b> Browsers won’t make sound until you tap something on the page.</li>
+          <li id="helpIos"><b>iPhone and iPad: turn the silent switch off.</b> Browser audio stays muted while the phone is on silent, even with the volume up.</li>
+          <li><b>Headphones help.</b> The stereo width and the drones are a big part of the sound, and phone speakers lose most of that.</li>
+          <li id="helpMidiNote"><b>MIDI controllers only work in Chrome or Edge on a computer.</b> Everything else works on phones.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Choose a sound</h3>
+        <ul>
+          <li><b>Samples…</b> loads a built-in sound. <b>Import audio</b> (or drag a file onto the page) uses your own, up to 60 seconds. <b>Record mic</b> captures up to 10 seconds.</li>
+          <li>The menu under the title switches <b>presets</b>. <b>Re-roll</b> gives a new variation with the same settings.</li>
+          <li>Long, sustained sounds — voice, strings, field recordings — make the best pads and drones.</li>
+          <li>Your audio never leaves this device; everything runs in the browser.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Shape it</h3>
+        <ul>
+          <li><b>Performance field:</b> drag left and right to move through the sound, up and down to make it brighter or darker.</li>
+          <li><b>TEXTURE</b> goes from long, smooth grains to short, dense ones.</li>
+          <li><b>DRIFT</b> sets how far and how fast the sound wanders on its own. Low drifts over minutes; high churns.</li>
+          <li><b>SPACE</b> is the reverb, from a room to an ocean. <b>PITCH</b> is how far the grains scatter in pitch.</li>
+          <li><b>DRONE</b> holds one spot in the sound and lets it evolve endlessly.</li>
+          <li><b>KEY</b> and <b>SCALE</b> keep everything in tune. Choose Free to unlock. Key assumes the sound is in C.</li>
+          <li><b>Detail</b> opens the fine controls: shimmer, tone, register and more.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Controls</h3>
+        <ul>
+          <li><b>Rings:</b> drag up or down, scroll, or use the arrow keys. Hold <kbd>Shift</kbd> for fine steps. Double-click returns to the preset value.</li>
+          <li><kbd>Space</kbd> plays and stops. <kbd>Esc</kbd> closes panels.</li>
+          <li><b>Render WAV</b> saves 8 seconds plus the reverb tail to your downloads.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>MIDI keyboard and knobs</h3>
+        <ul>
+          <li>Click <b>MIDI</b> and allow access. Then just play: notes set the pitch, and chords spread the cloud across the notes.</li>
+          <li>In Detail, <b>Latch</b> keeps a chord after you let go; <b>Gate</b> only sounds while keys are held.</li>
+          <li><b>Knobs:</b> click <b>Learn</b>, click a control’s MIDI badge, then turn a knob. For Play, Re-roll or Drone, click the button, then hit a pad.</li>
+          <li>Your mappings are saved in this browser.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Tips</h3>
+        <ul>
+          <li>For a drone: DRONE on, SPACE high, DRIFT low. Then leave it alone for a minute — it keeps changing.</li>
+          <li>For movement: DRONE off, raise DRIFT, and nudge Scan in Detail.</li>
+          <li>Shimmer adds a halo an octave up. A little goes a long way.</li>
+          <li>If the sound crackles, lower Density in Detail or close other tabs.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <linearGradient id="ringGrad" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#E8A857"/><stop offset="1" stop-color="#62D0DC"/></linearGradient>
@@ -1003,9 +1092,30 @@ window.addEventListener('dragleave', e=>{ if (!e.relatedTarget) $('dropzone').cl
 window.addEventListener('drop', e=>{ e.preventDefault(); $('dropzone').classList.remove('hot'); loadFile(e.dataTransfer.files[0]); });
 $('detailBtn').addEventListener('click', ()=>{ const o = $('detail').classList.toggle('open');
   $('detailBtn').classList.toggle('on', o); $('detailBtn').setAttribute('aria-expanded', o); });
+// ---- help ----
+// Platform-specific tips are pulled forward: the silent-switch warning only matters on iOS,
+// and the MIDI note is flagged where Web MIDI is missing.
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints > 1);
+const HAS_MIDI = !!navigator.requestMIDIAccess;
+if (IS_IOS){ $('iosTip').hidden = false; $('helpIos').classList.add('flag'); }
+if (!HAS_MIDI){ $('helpMidiNote').classList.add('flag'); $('midi').title = 'MIDI controllers need Chrome or Edge on a computer'; }
+let helpReturn = null;
+function setHelp(open){
+  const h = $('help'); if (open === h.classList.contains('open')) return;
+  h.classList.toggle('open', open);
+  if (open){ helpReturn = document.activeElement; $('helpClose').focus(); }
+  else if (helpReturn && helpReturn.focus) helpReturn.focus();
+}
+$('helpBtn').addEventListener('click', ()=>setHelp(true));
+$('gateHelp').addEventListener('click', ()=>setHelp(true));
+$('helpClose').addEventListener('click', ()=>setHelp(false));
+$('help').addEventListener('click', e=>{ if (e.target === $('help')) setHelp(false); });
 window.addEventListener('keydown', e=>{
-  if (e.code==='Space' && !/^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(e.target.tagName) && hasSource){ e.preventDefault(); setPlaying(!playing); }
-  else if (e.key==='Escape') { $('detail').classList.remove('open'); $('detailBtn').classList.remove('on'); }
+  if (e.code==='Space' && !/^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(e.target.tagName) && hasSource && !$('help').classList.contains('open')){ e.preventDefault(); setPlaying(!playing); }
+  else if (e.key==='Escape') {
+    if ($('help').classList.contains('open')) setHelp(false);
+    else { $('detail').classList.remove('open'); $('detailBtn').classList.remove('on'); $('detailBtn').setAttribute('aria-expanded', false); }
+  }
 });
 
 // ================= offline WAV export (grains + chaos + space, with the FX tail) =================
@@ -1129,7 +1239,7 @@ function attachInputs(){
   $('midiStatus').textContent = names.length ? ('◉ '+names.join(', ')) : 'no MIDI inputs found';
 }
 async function connectMidi(){
-  if(!navigator.requestMIDIAccess){ setStatus('Web MIDI needs Chrome or Edge (Safari does not support it).'); return; }
+  if(!navigator.requestMIDIAccess){ setStatus('MIDI controllers only work in Chrome or Edge on a computer. Everything else works here.'); return; }
   try{ MIDI.access = await navigator.requestMIDIAccess({sysex:false}); }
   catch(e){ setStatus('MIDI permission denied, or the page is not on https/localhost (Web MIDI needs a secure context).'); return; }
   attachInputs();
