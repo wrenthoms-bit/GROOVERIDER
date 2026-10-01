@@ -287,8 +287,8 @@ function pushSeed(){ node && node.port.postMessage({type:'seed', lo:seedLo>>>0, 
 async function loadChannels(chL, chR, frames, channels, name){
   await ensureAudio();
   const lBuf = chL.buffer.slice(chL.byteOffset, chL.byteOffset+frames*4);
-  const rBuf = (channels>1 && chR) ? chR.buffer.slice(chR.byteOffset, chR.byteOffset+frames*4) : lBuf;
-  node.port.postMessage({type:'source', channels, frames, l:lBuf, r:rBuf}, [lBuf, rBuf]);
+  const rBuf = (channels>1 && chR) ? chR.buffer.slice(chR.byteOffset, chR.byteOffset+frames*4) : null;
+  node.port.postMessage({type:'source', channels, frames, l:lBuf, r:rBuf}, rBuf ? [lBuf, rBuf] : [lBuf]);
   $('srcname').textContent = name;
   drawWaveform(chL, frames);
   $('dropzone').style.display='none';
