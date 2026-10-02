@@ -87,7 +87,7 @@ float ModEngine::sourceValue(uint8_t source) const noexcept {
     }
 }
 
-void ModEngine::applyDestination(uint8_t dest, float value, GrainScheduler& grains) noexcept {
+void ModEngine::applyDestination(uint8_t dest, float value, GrainEngine& grains) noexcept {
     switch (dest) {
         case kDestPosition:     grains.setPosition(std::clamp(value, 0.0f, 1.0f)); break;
         case kDestPitchSpray:   grains.setPitchSpraySemitones(std::clamp(value, 0.0f, 24.0f)); break;
@@ -100,13 +100,13 @@ void ModEngine::applyDestination(uint8_t dest, float value, GrainScheduler& grai
         case kDestReverseProb:  grains.setReverseProb(std::clamp(value, 0.0f, 1.0f)); break;
         case kDestDrift:        grains.setDrift(std::clamp(value, -2.0f, 2.0f)); break;
         case kDestSprayMs:      grains.setSprayMs(std::clamp(value, 0.0f, 5000.0f)); break;
-        case kDestOutputWidth:  combinedOutputWidth_ = std::clamp(value, 0.0f, 2.0f); break;
-        case kDestChaosRate:    break;   // consumed directly in tick(), not a scheduler param
+        case kDestOutputWidth:  grains.setOutputWidth(std::clamp(value, 0.0f, 2.0f)); break;
+        case kDestChaosRate:    break;   // consumed directly in tick(), not a grain param
         default: break;
     }
 }
 
-void ModEngine::tick(GrainScheduler& grains) noexcept {
+void ModEngine::tick(GrainEngine& grains) noexcept {
     float sums[kDestCount] = {};
     for (const auto& r : routes_) {
         if (!r.active || r.depth == 0.0f) continue;

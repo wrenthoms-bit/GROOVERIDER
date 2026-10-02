@@ -13,7 +13,7 @@
 namespace grv {
 
 constexpr int   MAX_GRAINS   = 256;
-constexpr int   MAX_FRAMES   = 48000 * 60;   // 60 s per channel cap (spec 2.1)
+constexpr int   MAX_FRAMES   = 48000 * 60;   // default source capacity: 60 s @ 48 kHz (spec 2.1)
 constexpr int   WIN_N        = 4096;
 constexpr int   NUM_WINDOWS  = 3;            // 0=Gaussian 1=Hann 2=Tukey
 
@@ -33,6 +33,8 @@ enum ParamId {
     P_OUT_WIDTH,     // 0 .. 2  (mid/side)
     P_OUT_GAIN,      // linear
     P_PLAYING,       // 0/1  gates grain spawning
+    P_ANTI_ALIAS,    // 0/1  per-grain lowpass on sped-up reads (spec 2.6); off by default
+    P_MAX_VOICES,    // 8 .. MAX_GRAINS  concurrent-grain ceiling (spec 8.4)
     P_COUNT
 };
 
@@ -59,6 +61,7 @@ struct Grain {
     float   haas;      // right-channel source offset in samples
     float   amp;
     float   panL, panR;
+    float   aaCoeff, aaL, aaR;   // anti-alias one-pole; aaCoeff == 0 means bypass
     uint32_t age, life;
     uint8_t win;
     bool    active;
@@ -78,9 +81,17 @@ public:
         setParamNow(P_REVERSE_PROB,0.2f); setParamNow(P_SPREAD,0.8f);
         setParamNow(P_WINDOW,0); setParamNow(P_OUT_WIDTH,1.0f); setParamNow(P_OUT_GAIN,0.9f);
         setParamNow(P_PLAYING,0);
+        setParamNow(P_ANTI_ALIAS,0); setParamNow(P_MAX_VOICES,(float)MAX_GRAINS);
         // smoothing coefficients per class (spec 2.8)
         cGain_ = onepoleSR(0.020f); cGeo_ = onepoleSR(0.080f); cMove_ = onepoleSR(0.050f);
+        for (int i=0;i<P_COUNT;i++){
+            if (i==P_DENSITY||i==P_GRAIN_MS) smCoeff_[i]=cGeo_;
+            else if (i==P_POSITION||i==P_DRIFT||i==P_PITCH) smCoeff_[i]=cMove_;
+            else smCoeff_[i]=cGain_;
+        }
+        rdc_ = 1.f - (TWO_PI*12.f/sr_);
         playhead_ = smTarget_[P_POSITION] * (frames_>0?frames_:1);
+        posPrev_ = sm_[P_POSITION];
         gcCur_ = 1.f;
         dcx0L_=dcy0L_=dcx0R_=dcy0R_=0.f;
         activeCount_ = 0; grainIndex_ = 0; nextOnset_ = 0;
@@ -88,8 +99,9 @@ public:
 
     void setSource(int channels, int frames){
         channels_ = channels < 1 ? 1 : (channels > 2 ? 2 : channels);
-        frames_   = frames < 0 ? 0 : (frames > MAX_FRAMES ? MAX_FRAMES : frames);
-        playhead_ = smTarget_[P_POSITION] * (frames_>0?frames_:1);
+        frames_   = frames < 0 ? 0 : (frames > capacity_ ? capacity_ : frames);
+        playhead_ = sm_[P_POSITION] * (frames_>0?frames_:1);
+        posPrev_ = sm_[P_POSITION];
         killAll();
     }
 
@@ -100,10 +112,20 @@ public:
     // -------- the entire hot path --------
     void render(float* out, int nframes){
         const bool playing = smTarget_[P_PLAYING] > 0.5f;
+        const int maxVoices = clampi((int)(smTarget_[P_MAX_VOICES]+0.5f),8,MAX_GRAINS);
+        const float* const bufL = srcL_;
+        const float* const bufR = channels_>1 ? srcR_ : srcL_;
+        const int frames = frames_;
         for (int n=0;n<nframes;++n){
             advanceSmoothers();
-            const double density = sm_[P_DENSITY] < 0.5f ? 0.5 : sm_[P_DENSITY];
+            double density = sm_[P_DENSITY] < 0.5f ? 0.5 : sm_[P_DENSITY];
             const double grainSamp = (double)sm_[P_GRAIN_MS] * 0.001 * sr_;
+            // soft-limit density so the cloud never needs more than maxVoices
+            // grains: refusing to spawn is silent, stealing one clicks (spec 2.5)
+            if (grainSamp > 1.0){
+                const double cap = (double)maxVoices * sr_ / grainSamp;
+                if (density > cap) density = cap;
+            }
 
             // gain compensation (spec 2.5): 1/(windowRms * sqrt(overlap))
             const int wi = clampi((int)(smTarget_[P_WINDOW]+0.5f),0,NUM_WINDOWS-1);
@@ -115,18 +137,21 @@ public:
             if (playing && frames_ > 0){
                 nextOnset_ -= 1.0;
                 while (nextOnset_ < 0.0){
-                    spawn(wi, grainSamp);
+                    spawn(wi, grainSamp, maxVoices);
                     double interval = sr_ / density;
                     double j = rngf(seed_, S_TIMING, grainIndex_);
                     nextOnset_ += interval * (1.0 + sm_[P_TIMING_JITTER]*(j*2.0-1.0)*0.9);
                 }
             }
 
-            // playhead drift (source scan)
+            // playhead: POSITION moves carry it along, drift scans it. A host
+            // that never moves POSITION after setSource gets pure drift.
+            const float posNow = sm_[P_POSITION];
+            if (posNow != posPrev_){ playhead_ += (double)(posNow - posPrev_) * frames_; posPrev_ = posNow; }
             playhead_ += sm_[P_DRIFT];
             if (frames_>0){
-                if (playhead_ >= frames_) playhead_ -= frames_;
-                if (playhead_ < 0) playhead_ += frames_;
+                while (playhead_ >= frames_) playhead_ -= frames_;
+                while (playhead_ < 0) playhead_ += frames_;
             }
 
             // render active grains
@@ -134,8 +159,12 @@ public:
             for (int g=0; g<activeCount_; ){
                 Grain& gr = pool_[g];
                 float w = winSample(gr.win, (float)gr.age / (float)gr.life);
-                float sL = readSrc(0, gr.srcPos);
-                float sR = readSrc(channels_>1?1:0, gr.srcPos + gr.haas);
+                float sL = readSrc(bufL, frames, gr.srcPos);
+                float sR = readSrc(bufR, frames, gr.srcPos + gr.haas);
+                if (gr.aaCoeff > 0.f){
+                    gr.aaL += (sL - gr.aaL) * gr.aaCoeff; sL = gr.aaL;
+                    gr.aaR += (sR - gr.aaR) * gr.aaCoeff; sR = gr.aaR;
+                }
                 float env = w * gr.amp;
                 l += sL * gr.panL * env;
                 r += sR * gr.panR * env;
@@ -147,9 +176,8 @@ public:
 
             // ---- output stage (spec 2.9) ----
             // DC blocker (~12 Hz one-pole HPF)
-            const float Rdc = 1.f - (TWO_PI*12.f/sr_);
-            float yL = l - dcx0L_ + Rdc*dcy0L_; dcx0L_=l; dcy0L_=yL;
-            float yR = r - dcx0R_ + Rdc*dcy0R_; dcx0R_=r; dcy0R_=yR;
+            float yL = l - dcx0L_ + rdc_*dcy0L_; dcx0L_=l; dcy0L_=yL;
+            float yR = r - dcx0R_ + rdc_*dcy0R_; dcx0R_=r; dcy0R_=yR;
             // width (mid/side)
             float wdt = sm_[P_OUT_WIDTH];
             float mid=(yL+yR)*0.5f, sid=(yL-yR)*0.5f*wdt;
@@ -178,24 +206,25 @@ public:
     int   activeGrains() const { return activeCount_; }
     float sampleRate()   const { return sr_; }
 
+    // read-only introspection for hosts and tests
+    const Grain& grainAt(int i) const { return pool_[i]; }
+    float windowAt(int wi, float ph) const { return winSample(clampi(wi,0,NUM_WINDOWS-1), ph); }
+    float windowRms(int wi) const { return winRms_[clampi(wi,0,NUM_WINDOWS-1)]; }
+
 private:
     static float onepole(float tau){ return 1.f - gexp(-1.f/(tau*48000.f)); } // coeff ref @48k; scaled below
     float onepoleSR(float tau){ return 1.f - gexp(-1.f/(tau*sr_)); }
 
     void advanceSmoothers(){
-        // geometry-class (slow), move-class, gain-class — recompute vs sr at init
-        for (int i=0;i<P_COUNT;i++){
-            float c;
-            if (i==P_DENSITY||i==P_GRAIN_MS) c=cGeo_;
-            else if (i==P_POSITION||i==P_DRIFT||i==P_PITCH) c=cMove_;
-            else c=cGain_;
-            sm_[i] += (smTarget_[i]-sm_[i]) * c;
-        }
+        // geometry-class (slow), move-class, gain-class — coefficients set at init
+        for (int i=0;i<P_COUNT;i++) sm_[i] += (smTarget_[i]-sm_[i]) * smCoeff_[i];
     }
 
-    void spawn(int wi, double grainSamp){
-        if (activeCount_ >= MAX_GRAINS) return;
+    void spawn(int wi, double grainSamp, int maxVoices){
+        // a refused grain still consumes its index, so the grains after it keep
+        // their identity whether or not the pool happened to be full
         uint64_t idx = grainIndex_++;
+        if (activeCount_ >= maxVoices) return;
         Grain& g = pool_[activeCount_++];
         g.active = true; g.age = 0; g.win = (uint8_t)wi;
 
@@ -213,6 +242,11 @@ private:
         if (rngf(seed_,S_REV,idx) < sm_[P_REVERSE_PROB]) rate = -rate;
         g.rate = rate;
 
+        // anti-alias one-pole at nyquist/|rate| for sped-up reads (spec 2.6)
+        float absRate = gabs(rate);
+        g.aaCoeff = (smTarget_[P_ANTI_ALIAS] > 0.5f && absRate > 1.2f) ? 1.f - gexp(-PI/absRate) : 0.f;
+        g.aaL = 0.f; g.aaR = 0.f;
+
         g.haas = (rngf(seed_,S_HAAS,idx)*2.f-1.f) * sm_[P_SPREAD] * 0.010f * sr_;
 
         float pan = 0.5f + (rngf(seed_,S_PAN,idx)-0.5f)*sm_[P_SPREAD];
@@ -221,23 +255,30 @@ private:
         g.amp = 1.f;
     }
 
-    inline float readSrc(int ch, double pos){
-        if (frames_ <= 0) return 0.f;
-        const float* buf = (ch==0)? srcL_ : srcR_;
-        // wrap
-        double p = pos;
-        if (p < 0) p += frames_ * (1 + (int)(-p/frames_));
-        if (p >= frames_) p = gfmod((float)p,(float)frames_);
-        int i1 = (int)p;
-        float t = (float)(p - i1);
-        int i0 = i1-1<0?0:i1-1, i2=i1+1>=frames_?frames_-1:i1+1, i3=i1+2>=frames_?frames_-1:i1+2;
-        float xm1=buf[i0], x0=buf[i1], x1=buf[i2], x2=buf[i3];
+    static inline float readSrc(const float* buf, int frames, double pos){
+        float xm1, x0, x1, x2, t;
+        if (pos >= 1.0 && pos < (double)(frames-2)){
+            // the common case: all four taps inside the source, nothing to wrap or clamp
+            const int i1 = (int)pos;
+            t = (float)(pos - i1);
+            xm1=buf[i1-1]; x0=buf[i1]; x1=buf[i1+1]; x2=buf[i1+2];
+        } else {
+            if (frames <= 0) return 0.f;
+            // wrap
+            double p = pos;
+            if (p < 0) p += frames * (1 + (int)(-p/frames));
+            if (p >= frames) p -= (double)frames * (double)(long long)(p/frames);
+            int i1 = (int)p; if (i1 >= frames) i1 = frames-1;
+            t = (float)(p - i1);
+            int i0 = i1-1<0?0:i1-1, i2=i1+1>=frames?frames-1:i1+1, i3=i1+2>=frames?frames-1:i1+2;
+            xm1=buf[i0]; x0=buf[i1]; x1=buf[i2]; x2=buf[i3];
+        }
         // Catmull-Rom (spec 2.6)
         float c=(x1-xm1)*0.5f, v=x0-x1, w=c+v, a=w+v+(x2-x0)*0.5f, b=w+a;
         return ((((a*t)-b)*t+c)*t+x0);
     }
 
-    inline float winSample(int wi, float ph){
+    inline float winSample(int wi, float ph) const {
         if (ph<0)ph=0; if(ph>1)ph=1;
         float fx = ph*(WIN_N-1);
         int i=(int)fx; float t=fx-i;
@@ -282,14 +323,17 @@ private:
 
 public:
     // host-provided source buffers (live in .bss, not the object) so the WASM
-    // binary stays small and the host writes PCM straight in.
-    void setBuffers(float* l, float* r){ srcL_ = l; srcR_ = r; }
+    // binary stays small and the host writes PCM straight in. `capacity` is how
+    // many frames each buffer holds; setSource() clamps to it.
+    void setBuffers(float* l, float* r, int capacity = MAX_FRAMES){
+        srcL_ = l; srcR_ = r; capacity_ = capacity < 0 ? 0 : capacity;
+    }
     float* srcL_ = nullptr;
     float* srcR_ = nullptr;
 
 private:
     float sr_ = 48000.f;
-    int   channels_ = 1, frames_ = 0;
+    int   channels_ = 1, frames_ = 0, capacity_ = MAX_FRAMES;
     uint64_t seed_ = 0x1234567890ABCDEFull;
 
     Grain pool_[MAX_GRAINS];
@@ -297,9 +341,12 @@ private:
     uint64_t grainIndex_ = 0;
     double nextOnset_ = 0;
     double playhead_ = 0;
+    float  posPrev_ = 0;
 
     float sm_[P_COUNT], smTarget_[P_COUNT];
     float cGain_=0.05f, cGeo_=0.02f, cMove_=0.03f;
+    float smCoeff_[P_COUNT];
+    float rdc_ = 0.998f;
     float gcCur_ = 1.f;
     float dcx0L_=0,dcy0L_=0,dcx0R_=0,dcy0R_=0;
 

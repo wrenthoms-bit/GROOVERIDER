@@ -6,7 +6,6 @@ find_package(oboe REQUIRED CONFIG)
 
 add_library(grooverider SHARED
         engine/Engine.cpp
-        engine/GrainScheduler.cpp
         engine/ModEngine.cpp
         engine/OfflineRenderer.cpp
         dsp/Resampler.cpp
@@ -14,7 +13,11 @@ add_library(grooverider SHARED
         jni/jni_bridge.cpp
 )
 
-target_include_directories(grooverider PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# core/ at the repo root is the grain engine shared with the web app.
+target_include_directories(grooverider PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../core
+)
 target_compile_features(grooverider PRIVATE cxx_std_17)
 
 target_compile_options(grooverider PRIVATE

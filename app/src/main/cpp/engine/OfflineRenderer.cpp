@@ -2,19 +2,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
-#include "../dsp/OutputStage.h"
 #include "../dsp/Resampler.h"
-#include "GrainScheduler.h"
+#include "GrainEngine.h"
 #include "ModEngine.h"
 
 namespace grvr {
 
 namespace {
 
-void applyBaseParams(GrainScheduler& grains, ModEngine& mod, const RenderRequest& req) {
+void applyBaseParams(GrainEngine& grains, ModEngine& mod, const RenderRequest& req) {
     grains.setMasterSeed(req.masterSeed);
     grains.setWindowType(req.windowType);
+    grains.setOutputGain(req.outputGain);
 
     mod.setMasterSeed(req.masterSeed);
     if (req.chaosEnabled) mod.loadFirstLight(); else mod.clearRoutes();
@@ -43,7 +44,8 @@ std::vector<float> OfflineRenderer::render(const SourceBuffer& source, const Ren
         ? source
         : Resampler::resample(source, osRate);
 
-    GrainScheduler grains;
+    const auto grainsOwner = std::make_unique<GrainEngine>();
+    GrainEngine& grains = *grainsOwner;
     grains.configure(static_cast<float>(osRate));
     grains.setSource(&osSource);
 
@@ -86,13 +88,6 @@ std::vector<float> OfflineRenderer::render(const SourceBuffer& source, const Ren
 
     std::vector<float> mix(static_cast<size_t>(renderFrames) * 2, 0.0f);
     renderInto(mix.data(), renderFrames);
-
-    OutputStage stage;
-    stage.configure(static_cast<float>(osRate));
-    for (int64_t i = 0; i < renderFrames; ++i) {
-        stage.process(mix[static_cast<size_t>(i) * 2], mix[static_cast<size_t>(i) * 2 + 1],
-                      req.outputWidth, req.outputGain);
-    }
 
     // Seamless loop wrap (spec 6.4): equal-power crossfade the tail overhang
     // back over the head. Grains are long, so a naive cut visibly and

@@ -1,19 +1,18 @@
 #include "engine/Engine.h"
-#include "engine/GrainScheduler.h"
+#include "engine/GrainEngine.h"
 #include "engine/ModEngine.h"
 #include "engine/OfflineRenderer.h"
 #include "mod/Lorenz.h"
 #include "io/ParamRing.h"
 #include "io/SourceBuffer.h"
 #include "io/TripleBuffer.h"
-#include "dsp/OutputStage.h"
 #include "dsp/Smoother.h"
-#include "dsp/Window.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <thread>
 #include <vector>
@@ -214,14 +213,13 @@ static float dbfs(float linear) {
     return 20.0f * std::log10(std::max(linear, 1e-9f));
 }
 
-static std::vector<float> renderGrains(GrainScheduler& sched, int32_t sampleRate, float seconds,
+static std::vector<float> renderGrains(GrainEngine& sched, int32_t sampleRate, float seconds,
                                        int32_t block = 192) {
     std::vector<float> out;
     const int32_t totalFrames = static_cast<int32_t>(seconds * static_cast<float>(sampleRate));
     std::vector<float> buf(static_cast<size_t>(block) * 2);
     for (int32_t done = 0; done < totalFrames; done += block) {
         const int32_t n = std::min(block, totalFrames - done);
-        std::fill(buf.begin(), buf.begin() + n * 2, 0.0f);
         sched.renderBlock(buf.data(), n);
         out.insert(out.end(), buf.begin(), buf.begin() + n * 2);
     }
@@ -229,13 +227,15 @@ static std::vector<float> renderGrains(GrainScheduler& sched, int32_t sampleRate
 }
 
 static void testWindowTables() {
-    WindowSet windows;
+    auto owner = std::make_unique<GrainEngine>();
+    GrainEngine& windows = *owner;
+    windows.configure(48000.0f);
     const char* names[] = {"Gaussian", "Tukey", "Hann"};
     for (uint16_t w = 0; w < kWindowCount; ++w) {
         char n0[80]; snprintf(n0, sizeof n0, "Window %s: exactly 0.0 at phase 0", names[w]);
-        check(windows.sample(w, 0.0f) == 0.0f, n0);
+        check(windows.windowAt(w, 0.0f) == 0.0f, n0);
         char n1[80]; snprintf(n1, sizeof n1, "Window %s: exactly 0.0 at phase 1", names[w]);
-        check(windows.sample(w, 1.0f) == 0.0f, n1);
+        check(windows.windowAt(w, 1.0f) == 0.0f, n1);
     }
 }
 
@@ -247,7 +247,7 @@ static void testDensityLevelTrend() {
         double sumDb = 0.0;
         constexpr int seeds = 8;
         for (int s = 0; s < seeds; ++s) {
-            GrainScheduler sched;
+            GrainEngine sched;
             sched.configure(sr);
             sched.setSource(&noise);
             sched.setMasterSeed(1000 + static_cast<uint64_t>(s));
@@ -278,7 +278,7 @@ static void testPitchSprayDecorrelation() {
         auto levelAt = [&](float density) {
             double sumDb = 0.0;
             for (int s = 0; s < seeds; ++s) {
-                GrainScheduler sched;
+                GrainEngine sched;
                 sched.configure(sr);
                 sched.setSource(&tone);
                 sched.setMasterSeed(500 + static_cast<uint64_t>(s));
@@ -312,7 +312,7 @@ static void testPitchSprayDecorrelation() {
 static void testSpreadSurvivesMonoSum() {
     constexpr int32_t sr = 48000;
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 777);
-    GrainScheduler sched;
+    GrainEngine sched;
     sched.configure(sr);
     sched.setSource(&noise);
     sched.setMasterSeed(9);
@@ -345,7 +345,7 @@ static void testSpreadSurvivesMonoSum() {
 static void testReverseDcOffset() {
     constexpr int32_t sr = 48000;
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 55);
-    GrainScheduler sched;
+    GrainEngine sched;
     sched.configure(sr);
     sched.setSource(&noise);
     sched.setMasterSeed(3);
@@ -354,24 +354,21 @@ static void testReverseDcOffset() {
     sched.setReverseProb(1.0f);
     sched.setSprayMs(0.0f);
     sched.setDrift(0.0f);
-    auto audio = renderGrains(sched, sr, 2.0f);
+    // Spec M2 measures this "after 60 s". A shorter take mostly measures the
+    // start-up transient: over 2 s the reading swings by +-10 dB from one
+    // master seed to the next.
+    auto audio = renderGrains(sched, sr, 60.0f);
 
-    // The DC blocker lives in OutputStage, not in the raw grain mix (spec
-    // 2.9's "Output DC offset" is measured post output-stage, same as Engine
-    // applies it) -- run the cloud through one here to match.
-    OutputStage stage;
-    stage.configure(static_cast<float>(sr));
+    // The core's output stage (DC blocker included) is already in this signal
+    // -- spec 2.9's "Output DC offset" is measured post output-stage.
     const size_t frames = audio.size() / 2;
-    for (size_t i = 0; i < frames; ++i) {
-        stage.process(audio[i * 2], audio[i * 2 + 1], 1.0f, 1.0f);
-    }
 
     double sum = 0.0;
     for (size_t i = 0; i < frames; ++i) sum += audio[i * 2];
     const double dc = sum / static_cast<double>(std::max<size_t>(1, frames));
     char detail[64];
     snprintf(detail, sizeof detail, "(DC %.2e = %.1f dBFS)", dc, dbfs(static_cast<float>(std::fabs(dc))));
-    check(std::fabs(dc) < 1e-4, "Grain: reverseProb=1.0 keeps DC offset below -80 dBFS post output-stage", detail);
+    check(std::fabs(dc) < 1e-4, "Grain: reverseProb=1.0 keeps DC below -80 dBFS over 60 s", detail);
 }
 
 static void testWindowTypeLevelMatch() {
@@ -379,7 +376,7 @@ static void testWindowTypeLevelMatch() {
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 321);
 
     auto levelFor = [&](uint16_t windowType) {
-        GrainScheduler sched;
+        GrainEngine sched;
         sched.configure(sr);
         sched.setSource(&noise);
         sched.setMasterSeed(7);
@@ -406,7 +403,7 @@ static void testWindowTypeLevelMatch() {
 static void testVoiceCap() {
     constexpr int32_t sr = 48000;
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 99);
-    GrainScheduler sched;
+    GrainEngine sched;
     sched.configure(sr);
     sched.setSource(&noise);
     sched.setMasterSeed(1);
@@ -418,10 +415,52 @@ static void testVoiceCap() {
     check(sched.activeVoices() <= kMaxGrains, "Grain: voice count never exceeds MAX_GRAINS at extreme density/size");
 }
 
+static void testAdaptiveCapHolds() {
+    constexpr int32_t sr = 48000;
+    SourceBuffer noise = makeNoiseSource(sr * 2, sr, 99);
+    GrainEngine sched;
+    sched.configure(sr);
+    sched.setSource(&noise);
+    sched.setMasterSeed(1);
+    sched.setMaxVoices(64);          // the floor tier from spec 8.4
+    sched.setDensity(200.0f);
+    sched.setGrainSizeMs(2000.0f);
+    std::vector<float> buf(192 * 2);
+    int32_t worst = 0;
+    for (int block = 0; block < 1500; ++block) {
+        sched.renderBlock(buf.data(), 192);
+        worst = std::max(worst, sched.activeVoices());
+    }
+    char detail[48]; snprintf(detail, sizeof detail, "(peak %d voices)", worst);
+    check(worst <= 64 && worst > 48, "Grain: adaptive voice cap of 64 is respected, cloud stays full", detail);
+}
+
+static void testPositionIsLive() {
+    constexpr int32_t sr = 48000;
+    SourceBuffer noise = makeNoiseSource(sr * 2, sr, 11);
+    GrainEngine sched;
+    sched.configure(sr);
+    sched.setSource(&noise);
+    sched.setDrift(0.0f);
+    sched.setSprayMs(0.0f);
+    sched.setPosition(0.25f);
+    (void)renderGrains(sched, sr, 1.0f);
+    auto snap = std::make_unique<GrainCloudSnapshot>();
+    sched.writeSnapshot(*snap);
+    const float before = snap->count > 0 ? snap->grains[snap->count - 1].sourcePosNorm : -1.0f;
+    sched.setPosition(0.75f);        // what the XY pad does
+    (void)renderGrains(sched, sr, 2.0f);
+    sched.writeSnapshot(*snap);
+    const float after = snap->count > 0 ? snap->grains[snap->count - 1].sourcePosNorm : -1.0f;
+    char detail[64]; snprintf(detail, sizeof detail, "(newest grain %.2f -> %.2f)", before, after);
+    check(std::fabs(before - 0.25f) < 0.2f && std::fabs(after - 0.75f) < 0.2f,
+          "Grain: moving position while playing moves the cloud", detail);
+}
+
 static void testGrainSizeSweepNoDropout() {
     constexpr int32_t sr = 48000;
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 5);
-    GrainScheduler sched;
+    GrainEngine sched;
     sched.configure(sr);
     sched.setSource(&noise);
     sched.setMasterSeed(1);
@@ -433,7 +472,6 @@ static void testGrainSizeSweepNoDropout() {
     bool anyBad = false;
     for (int step = 0; step < 400; ++step) {
         sched.setGrainSizeMs(5.0f + static_cast<float>(step) * 5.0f);   // 5 -> 2005 ms
-        std::fill(buf.begin(), buf.end(), 0.0f);
         sched.renderBlock(buf.data(), 192);
         for (float v : buf) if (std::isnan(v) || std::isinf(v)) anyBad = true;
     }
@@ -447,7 +485,7 @@ static void testBitIdenticalRender() {
     constexpr int32_t sr = 48000;
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 4242);
 
-    auto configureStandard = [&](GrainScheduler& sched) {
+    auto configureStandard = [&](GrainEngine& sched) {
         sched.configure(sr);
         sched.setSource(&noise);
         sched.setMasterSeed(123456789ULL);
@@ -464,17 +502,17 @@ static void testBitIdenticalRender() {
         sched.setSpread(0.9f);
     };
 
-    GrainScheduler a; configureStandard(a);
-    GrainScheduler b; configureStandard(b);
+    GrainEngine a; configureStandard(a);
+    GrainEngine b; configureStandard(b);
     auto audioA = renderGrains(a, sr, 1.0f, 192);
     auto audioB = renderGrains(b, sr, 1.0f, 192);
     const bool sameRun = audioA.size() == audioB.size() &&
         std::memcmp(audioA.data(), audioB.data(), audioA.size() * sizeof(float)) == 0;
     check(sameRun, "Determinism: same Seed rendered twice is bit-identical (memcmp)");
 
-    GrainScheduler c; configureStandard(c);
-    GrainScheduler d; configureStandard(d);
-    GrainScheduler e; configureStandard(e);
+    GrainEngine c; configureStandard(c);
+    GrainEngine d; configureStandard(d);
+    GrainEngine e; configureStandard(e);
     auto audio96  = renderGrains(c, sr, 1.0f, 96);
     auto audio384 = renderGrains(d, sr, 1.0f, 384);
     auto audio960 = renderGrains(e, sr, 1.0f, 960);
@@ -485,12 +523,62 @@ static void testBitIdenticalRender() {
     check(blockInvariant, "Determinism: bit-identical at block sizes 96/384/960 vs 192");
 }
 
+static void testMatchesSharedCore() {
+    // "Shared brain" (ANDROID_OBSERVATORY_BRIEF): GrainEngine must add nothing
+    // of its own to the sound. Drive core/GrainCore.h directly, the way the
+    // web app does, and expect the very same bytes.
+    constexpr int32_t sr = 48000;
+    SourceBuffer noise = makeNoiseSource(sr * 2, sr, 2024);
+
+    GrainEngine android;
+    android.configure(sr);
+    android.setSource(&noise);
+    android.setMasterSeed(0x0051A9D005700A11ULL);
+    android.setDensity(60.0f);
+    android.setGrainSizeMs(300.0f);
+    android.setPosition(0.4f);
+    android.setDrift(0.1f);
+    android.setPitchSemitones(7.0f);
+    android.setPitchSpraySemitones(0.3f);
+    android.setReverseProb(0.3f);
+    android.setSpread(0.9f);
+    android.setWindowType(kWindowTukey);
+    android.setOutputWidth(1.4f);
+    const auto fromAndroid = renderGrains(android, sr, 2.0f, 192);
+
+    std::vector<float> pcm = noise.channel(0);
+    auto core = std::make_unique<grv::GrainCore>();
+    core->setBuffers(pcm.data(), pcm.data(), static_cast<int>(pcm.size()));
+    core->init(static_cast<float>(sr));
+    core->setParamNow(grv::P_PLAYING, 1.0f);
+    core->setParamNow(grv::P_ANTI_ALIAS, 1.0f);
+    core->setParam(grv::P_DENSITY, 60.0f);
+    core->setParam(grv::P_GRAIN_MS, 300.0f);
+    core->setParam(grv::P_POSITION, 0.4f);
+    core->setParam(grv::P_DRIFT, 0.1f);
+    core->setParam(grv::P_PITCH, 7.0f);
+    core->setParam(grv::P_PITCH_SPRAY, 0.3f);
+    core->setParam(grv::P_REVERSE_PROB, 0.3f);
+    core->setParam(grv::P_SPREAD, 0.9f);
+    core->setParam(grv::P_WINDOW, 2.0f);         // the core's id for Tukey
+    core->setParam(grv::P_OUT_WIDTH, 1.4f);
+    core->setSource(1, static_cast<int>(pcm.size()));
+    core->setSeed(0x0051A9D005700A11ULL);
+    std::vector<float> fromCore(fromAndroid.size());
+    for (size_t done = 0; done < fromCore.size() / 2; done += 128)   // the web's block size
+        core->render(fromCore.data() + done * 2, static_cast<int>(std::min<size_t>(128, fromCore.size() / 2 - done)));
+
+    const bool identical = rmsOf(fromAndroid) > 0.01f &&
+        std::memcmp(fromAndroid.data(), fromCore.data(), fromCore.size() * sizeof(float)) == 0;
+    check(identical, "Determinism: Android output is bit-identical to core/GrainCore.h");
+}
+
 static void testPanIndependentOfPitchSpray() {
     constexpr int32_t sr = 48000;
     SourceBuffer noise = makeNoiseSource(sr * 2, sr, 1);
 
     auto capturePans = [&](float pitchSpray) {
-        GrainScheduler sched;
+        GrainEngine sched;
         sched.configure(sr);
         sched.setSource(&noise);
         sched.setMasterSeed(777);
@@ -570,7 +658,7 @@ static void testModDepthZeroBitIdentical() {
             mod.clearRoutes();
         }
 
-        GrainScheduler sched;
+        GrainEngine sched;
         sched.configure(sr);
         sched.setSource(&noise);
         sched.setMasterSeed(1234);
@@ -700,10 +788,13 @@ int main() {
     testReverseDcOffset();
     testWindowTypeLevelMatch();
     testVoiceCap();
+    testAdaptiveCapHolds();
+    testPositionIsLive();
     testGrainSizeSweepNoDropout();
 
     printf("\n== Grooverider M3 determinism checks ==\n\n");
     testBitIdenticalRender();
+    testMatchesSharedCore();
     testPanIndependentOfPitchSpray();
 
     printf("\n== Grooverider M4 modulation & chaos checks ==\n\n");

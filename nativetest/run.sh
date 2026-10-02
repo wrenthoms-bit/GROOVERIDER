@@ -17,9 +17,9 @@ CORE=../app/src/main/cpp
 
 echo "building with $CXX ..."
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -ffp-contract=off \
-    -Ishim -I"$CORE" \
+    -Ishim -I"$CORE" -I../core \
     -o /tmp/grooverider_tests \
-    test_engine.cpp "$CORE/engine/Engine.cpp" "$CORE/engine/GrainScheduler.cpp" \
+    test_engine.cpp "$CORE/engine/Engine.cpp" \
     "$CORE/engine/ModEngine.cpp" "$CORE/engine/OfflineRenderer.cpp" \
     "$CORE/dsp/Resampler.cpp" log_stub.cpp \
     -lpthread

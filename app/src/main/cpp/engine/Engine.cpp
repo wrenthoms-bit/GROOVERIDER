@@ -130,11 +130,6 @@ void Engine::configureSmoothers(float sr) noexcept {
 
     grainEngine_.configure(sr);
     modEngine_.configure(static_cast<uint64_t>(pendingMasterSeed_.load(std::memory_order_relaxed)));
-    outputStage_.configure(sr);
-    outputWidth_.configure(0.020f, sr);
-    outputGain_.configure(0.020f, sr);
-    outputWidth_.snap(modEngine_.combinedOutputWidth());
-    outputGain_.snap(0.9f);
 
     controlPeriodSamples_ = std::max(1, static_cast<int32_t>(sr / 1000.0f));
     controlCountdown_ = controlPeriodSamples_;
@@ -168,7 +163,7 @@ void Engine::applyPendingParams() noexcept {
 
             // Grain params set the *base* value; ModEngine::tick() layers
             // modulation on top each control tick and pushes the combined
-            // value into the scheduler (spec 4.4). A route at depth 0 leaves
+            // value into the grain engine (spec 4.4). A route at depth 0 leaves
             // the base untouched, so this is bit-identical to the M2/M3 path.
             case kGrainDensity:      modEngine_.setBase(kDestDensity, msg.value); break;
             case kGrainTimingJitter: modEngine_.setBase(kDestTimingJitter, msg.value); break;
@@ -184,7 +179,7 @@ void Engine::applyPendingParams() noexcept {
             case kGrainWindowType:   grainEngine_.setWindowType(static_cast<uint16_t>(msg.value + 0.5f)); break;
 
             case kOutputWidth: modEngine_.setBase(kDestOutputWidth, msg.value); break;
-            case kOutputGain:  outputGain_.setTarget(msg.value); break;
+            case kOutputGain:  grainEngine_.setOutputGain(msg.value); break;
             case kChaosRate:   modEngine_.setBase(kDestChaosRate, msg.value); break;
             default: break;
         }
@@ -226,13 +221,12 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
     // --- source preview mixed on top (M1) ---
     renderPreview(out, numFrames, peakL, peakR);
 
-    // --- grain cloud (M2). Rendered into its own scratch buffer so its
-    // output stage (DC blocker / width / saturation) never touches the
+    // --- grain cloud (M2). Rendered into its own scratch buffer so the
+    // core's output stage (DC blocker / width / saturation) never touches the
     // diagnostic tone or preview paths, whose exact linearity the M0 tests
     // depend on.
     {
         const int32_t n = numFrames <= kMaxBlockFrames ? numFrames : kMaxBlockFrames;
-        std::fill(grainMix_, grainMix_ + static_cast<size_t>(n) * 2, 0.0f);
 
         // Mod engine ticks at a fixed 1 kHz control rate (spec 4.3) regardless
         // of the audio callback's burst size, so render in control-period
@@ -241,7 +235,6 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
         while (offset < n) {
             if (controlCountdown_ <= 0) {
                 modEngine_.tick(grainEngine_);
-                outputWidth_.setTarget(modEngine_.combinedOutputWidth());
                 controlCountdown_ = controlPeriodSamples_;
             }
             const int32_t chunk = std::min(controlCountdown_, n - offset);
@@ -251,11 +244,8 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            const float width = outputWidth_.next();
-            const float gain  = outputGain_.next();
-            float gl = grainMix_[i * 2];
-            float gr = grainMix_[i * 2 + 1];
-            outputStage_.process(gl, gr, width, gain);
+            const float gl = grainMix_[i * 2];
+            const float gr = grainMix_[i * 2 + 1];
             out[i * 2]     += gl;
             out[i * 2 + 1] += gr;
             const float al = gl < 0.0f ? -gl : gl;
@@ -448,21 +438,20 @@ int32_t Engine::profileAndSetVoiceCap() {
     }
     SourceBuffer bench(std::move(ch), static_cast<int32_t>(kSr));
 
-    GrainScheduler sched;
-    sched.configure(kSr);
-    sched.setSource(&bench);
-    sched.setMaxVoices(kMaxGrains);
-    sched.setDensity(200.0f);
-    sched.setGrainSizeMs(1200.0f);
-    sched.setSpread(1.0f);
-    sched.setPitchSpraySemitones(12.0f);
-    sched.setReverseProb(0.5f);
+    auto grains = std::make_unique<GrainEngine>();
+    grains->configure(kSr);
+    grains->setSource(&bench);
+    grains->setMaxVoices(kMaxGrains);
+    grains->setDensity(200.0f);
+    grains->setGrainSizeMs(1200.0f);
+    grains->setSpread(1.0f);
+    grains->setPitchSpraySemitones(12.0f);
+    grains->setReverseProb(0.5f);
 
     std::vector<float> buf(192 * 2);
     const auto t0 = std::chrono::steady_clock::now();
     for (int32_t done = 0; done < kProfileFrames; done += 192) {
-        std::fill(buf.begin(), buf.end(), 0.0f);
-        sched.renderBlock(buf.data(), 192);
+        grains->renderBlock(buf.data(), 192);
     }
     const auto t1 = std::chrono::steady_clock::now();
     const double elapsedSec =

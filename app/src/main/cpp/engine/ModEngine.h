@@ -5,14 +5,14 @@
 #include "../mod/Lfo.h"
 #include "../mod/Lorenz.h"
 #include "../mod/ModMatrix.h"
-#include "GrainScheduler.h"
+#include "GrainEngine.h"
 
 namespace grvr {
 
 /// Owns every modulation source (spec 4.2) and the 16-slot matrix that routes
-/// them to scheduler params. Ticked at a 1 kHz control rate by Engine; the
+/// them to grain params. Ticked at a 1 kHz control rate by Engine; the
 /// combined (base + mod) value for each destination is what actually reaches
-/// GrainScheduler, so a route at depth 0 is bit-identical to no route at all.
+/// GrainEngine, so a route at depth 0 is bit-identical to no route at all.
 class ModEngine {
 public:
     void configure(uint64_t masterSeed) noexcept;
@@ -38,10 +38,8 @@ public:
 
     /// One control tick (call at 1 kHz realtime / 4 kHz offline). Advances
     /// every source and pushes the combined value into `grains` for every
-    /// destination except output width, which the caller applies itself.
-    void tick(GrainScheduler& grains) noexcept;
-
-    float combinedOutputWidth() const noexcept { return combinedOutputWidth_; }
+    /// destination.
+    void tick(GrainEngine& grains) noexcept;
 
     // Introspection for the 60-minute Lorenz stability test.
     float lorenzRawX() const noexcept { return lorenz_.rawX(); }
@@ -50,7 +48,7 @@ public:
 
 private:
     float sourceValue(uint8_t source) const noexcept;
-    void  applyDestination(uint8_t dest, float value, GrainScheduler& grains) noexcept;
+    void  applyDestination(uint8_t dest, float value, GrainEngine& grains) noexcept;
 
     Lorenz   lorenz_;
     DriftGen driftA_, driftB_, driftC_;
@@ -58,7 +56,6 @@ private:
     ModRoute routes_[kModMatrixSlots];
     float    macros_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float    base_[kDestCount] = {};
-    float    combinedOutputWidth_ = 1.0f;
 
     static constexpr float kControlRateHz = 1000.0f;
 };

@@ -7,13 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "../dsp/OutputStage.h"
 #include "../dsp/Smoother.h"
 #include "../io/SourceBuffer.h"
 #include "../io/ParamRing.h"
 #include "../io/TripleBuffer.h"
 #include "../io/CaptureRing.h"
-#include "GrainScheduler.h"
+#include "GrainEngine.h"
 #include "ModEngine.h"
 #include "ParamId.h"
 
@@ -67,7 +66,7 @@ public:
     /// Runs a short synthetic benchmark and picks a voice-cap tier -- 256
     /// flagship / 128 mid-tier / 64 floor (spec 8.4, M8). Call off the audio
     /// thread: it renders ~1s of throwaway audio on its own scratch
-    /// GrainScheduler to measure, then applies the result to grainEngine_'s
+    /// GrainEngine to measure, then applies the result to grainEngine_'s
     /// voice cap (safe to call while the real engine is running -- the cap
     /// is atomic).
     int32_t profileAndSetVoiceCap();
@@ -154,16 +153,13 @@ private:
     std::atomic<bool>  restarting_ {false};
     std::atomic<float> stopFade_   {1.0f};   // driven to 0 for a clickless stop
 
-    // --- grain engine (M2). Grains render into grainMix_ and pass through
-    // their own OutputStage before being added to `out`; the M0 test tone and
+    // --- grain engine (M2): the shared core, output stage included. Grains
+    // render into grainMix_ before being added to `out`; the M0 test tone and
     // the M1 raw preview stay outside it so their diagnostic level readouts
     // remain exactly linear.
-    GrainScheduler grainEngine_;
+    GrainEngine    grainEngine_;
     ModEngine      modEngine_;
-    OutputStage    outputStage_;
     CaptureRing    captureRing_;
-    Smoother       outputWidth_;
-    Smoother       outputGain_;
     static constexpr int32_t kMaxBlockFrames = 8192;
     float grainMix_[kMaxBlockFrames * 2] = {};
 
