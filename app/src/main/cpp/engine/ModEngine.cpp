@@ -126,7 +126,7 @@ void ModEngine::applyDestination(uint8_t dest, float value, GrainEngine& grains)
 void ModEngine::tick(GrainEngine& grains) noexcept {
     float sums[kDestCount] = {};
     for (const auto& r : routes_) {
-        if (!r.active || r.depth == 0.0f) continue;
+        if (routesMuted_ || !r.active || r.depth == 0.0f) continue;
         const float shaped = applyModCurve(sourceValue(r.source), r.curve);
         sums[r.dest] += shaped * r.depth * destRange(r.dest);
     }

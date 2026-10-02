@@ -758,7 +758,150 @@ static void testSeamlessLoopJoin() {
     check(joinStep < meanStep * 20.0 + 1e-4, "OfflineRenderer: seamless loop join has no seam spike", detail);
 }
 
-// ---------------------------------------------------- 9. Adaptive voice cap (M8)
+// ---------------------------------------------------- 9. Observatory mode
+// core/Observatory.h has its own suite (test_observatory.cpp). These check the
+// Android seat on it: GrainEngine's two modes and the offline renderer.
+
+static SourceBuffer makeChordSource(int64_t frames, int32_t sampleRate) {
+    std::vector<float> ch(static_cast<size_t>(frames), 0.0f);
+    for (int h = 1; h <= 6; ++h)
+        for (int64_t i = 0; i < frames; ++i)
+            ch[static_cast<size_t>(i)] += 0.25f / static_cast<float>(h) *
+                std::sin(2.0f * static_cast<float>(M_PI) * 131.0f * static_cast<float>(h) *
+                         static_cast<float>(i) / static_cast<float>(sampleRate) + static_cast<float>(h));
+    return SourceBuffer({ch}, sampleRate);
+}
+
+/// "Standing Room Only" as the app sends it.
+static void applyStandingRoomOnly(GrainEngine& g) {
+    g.setMasterSeed(0x0051A9D005700A11ULL);
+    g.setDensity(60.0f); g.setGrainSizeMs(2000.0f); g.setTimingJitter(0.5f); g.setSizeJitter(0.35f);
+    g.setReverseProb(0.3f); g.setOutputGain(0.8f);
+    g.setPosition(0.42f); g.setSprayMs(900.0f); g.setSpread(0.868f); g.setOutputWidth(1.4f);
+    g.setObsParam(grv::O_CHAOS, 0.14f); g.setObsParam(grv::O_PITCH, 0.30f); g.setObsParam(grv::O_KEY, 3.0f);
+    g.setObsParam(grv::O_SCALE, 3.0f); g.setObsParam(grv::O_REGISTER, -12.0f); g.setObsParam(grv::O_DETUNE, 0.06f);
+    g.setObsParam(grv::O_DRONE, 1.0f); g.setObsParam(grv::O_SPACE, 0.86f); g.setObsParam(grv::O_SHIMMER, 0.42f);
+    g.setObsParam(grv::O_TONE, 0.52f); g.setObsParam(grv::O_SCAN, 0.0f);
+    g.setObservatory(true);
+}
+
+static float rmsDbOver(const std::vector<float>& x, int32_t sr, float fromSec, float toSec) {
+    const auto a = static_cast<size_t>(fromSec * static_cast<float>(sr)) * 2, b = static_cast<size_t>(toSec * static_cast<float>(sr)) * 2;
+    return dbfs(rmsOf(std::vector<float>(x.begin() + static_cast<long>(a), x.begin() + static_cast<long>(b))));
+}
+
+static void testObservatoryMode() {
+    constexpr int32_t sr = 48000;
+    SourceBuffer chord = makeChordSource(sr * 6, sr);
+
+    auto render = [&](int32_t block) {
+        auto g = std::make_unique<GrainEngine>();
+        g->configure(sr); g->setSource(&chord); applyStandingRoomOnly(*g);
+        return renderGrains(*g, sr, 12.0f, block);
+    };
+    const auto a = render(192), b = render(192);
+    check(a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0,
+          "Observatory: same Seed rendered twice is bit-identical");
+    bool invariant = true;
+    for (int32_t block : {96, 256, 960}) {
+        const auto c = render(block);
+        if (std::memcmp(a.data(), c.data(), std::min(a.size(), c.size()) * sizeof(float)) != 0) invariant = false;
+    }
+    check(invariant, "Observatory: bit-identical at block sizes 96/256/960 vs 192");
+
+    float peak = 0; for (float v : a) peak = std::max(peak, std::fabs(v));
+    char d[128]; snprintf(d, sizeof d, "(rms %.1f dBFS, peak %.3f)", rmsDbOver(a, sr, 8, 12), peak);
+    check(rmsDbOver(a, sr, 8, 12) > -30 && rmsDbOver(a, sr, 8, 12) < -6 && peak <= 1.0f,
+          "Observatory: Standing Room Only sits at a musical level, under full scale", d);
+
+    // every grain on E-flat minor, and a tail once the grains stop
+    auto g = std::make_unique<GrainEngine>();
+    g->configure(sr); g->setSource(&chord); applyStandingRoomOnly(*g);
+    (void)renderGrains(*g, sr, 6.0f);
+    int offScale = 0;
+    for (int32_t i = 0; i < g->activeVoices(); ++i) {
+        const double st = 12.0 * std::log2(std::fabs(g->grainAt(i).rate));
+        const int n = static_cast<int>(std::lround(st)), deg = (((n - 3) % 12) + 12) % 12;
+        const bool inMinor = deg == 0 || deg == 2 || deg == 3 || deg == 5 || deg == 7 || deg == 8 || deg == 10;
+        if (std::fabs(st - n) > 0.1 || !inMinor) ++offScale;   // 0.1 st: the preset's own detune
+    }
+    snprintf(d, sizeof d, "(%d grains, %d off the scale)", g->activeVoices(), offScale);
+    check(g->activeVoices() > 60 && offScale == 0, "Observatory: scale-lock holds through the Android engine", d);
+    g->setPlaying(false);
+    const auto tail = renderGrains(*g, sr, 4.0f);
+    snprintf(d, sizeof d, "(%.1f dBFS 3 s after the grains stop)", rmsDbOver(tail, sr, 2.5f, 3.5f));
+    check(rmsDbOver(tail, sr, 2.5f, 3.5f) > -50, "Observatory: the reverb rings on after the grains stop", d);
+}
+
+static void testModeSwitch() {
+    constexpr int32_t sr = 48000;
+    SourceBuffer tone = makeToneSource(sr * 4, sr, 220.0f);
+    auto g = std::make_unique<GrainEngine>();
+    g->configure(sr); g->setSource(&tone);
+    g->setSprayMs(0.0f); g->setDrift(0.0f); g->setPitchSpraySemitones(0.0f); g->setReverseProb(0.0f); g->setPosition(0.3f);
+    auto legacyA = renderGrains(*g, sr, 2.0f);
+
+    g->setObsParam(grv::O_SPACE, 0.6f); g->setObsParam(grv::O_CHAOS, 0.0f);
+    g->setObservatory(true);
+    auto on = renderGrains(*g, sr, 3.0f);
+    g->setObservatory(false);
+    // What Engine's control tick does next: hand the core back what the Observatory had been steering.
+    g->setDrift(0.0f); g->setPitchSemitones(0.0f); g->setPitchSpraySemitones(0.0f);
+    g->setSprayMs(0.0f); g->setSpread(0.8f); g->setOutputWidth(1.0f); g->setPosition(0.3f);
+    auto legacyB = renderGrains(*g, sr, 3.0f);
+
+    // A click is a sample-to-sample jump far beyond what a 220 Hz cloud at this level can make.
+    float worst = 0;
+    for (const auto* part : {&on, &legacyB})
+        for (size_t i = 2; i < static_cast<size_t>(sr) / 5 * 2; i += 2) worst = std::max(worst, std::fabs((*part)[i] - (*part)[i - 2]));
+    char d[160]; snprintf(d, sizeof d, "(largest step across both switches %.4f)", worst);
+    check(worst < 0.08f, "Observatory: switching it on and off does not click", d);
+
+    auto snap = std::make_unique<GrainCloudSnapshot>();
+    g->writeSnapshot(*snap);
+    const float pos = snap->count > 0 ? snap->grains[snap->count - 1].sourcePosNorm : -1.0f;
+    snprintf(d, sizeof d, "(before %.1f dBFS, after %.1f dBFS, playhead back at %.2f)",
+             rmsDbOver(legacyA, sr, 1, 2), rmsDbOver(legacyB, sr, 2, 3), pos);
+    check(!g->observatory() && std::fabs(rmsDbOver(legacyA, sr, 1, 2) - rmsDbOver(legacyB, sr, 2, 3)) < 1.5f &&
+          std::fabs(pos - 0.3f) < 0.05f,
+          "Observatory: switched off, the plain engine carries on as before", d);
+}
+
+static void testOfflineObservatory() {
+    constexpr int32_t dstRate = 48000;
+    SourceBuffer chord = makeChordSource(dstRate * 6, dstRate);
+    RenderRequest req;
+    req.masterSeed = 0x0051A9D005700A11ULL;
+    req.density = 60; req.grainSizeMs = 2000; req.timingJitter = 0.5f; req.sizeJitter = 0.35f; req.reverseProb = 0.3f;
+    req.position = 0.42f; req.sprayMs = 900; req.spread = 0.868f; req.outputWidth = 1.4f; req.outputGain = 0.8f;
+    req.chaosEnabled = false; req.observatory = true;
+    req.chaos = 0.14f; req.pitchAmount = 0.30f; req.key = 3; req.scale = 3; req.registerSt = -12; req.detune = 0.06f;
+    req.drone = 1; req.space = 0.86f; req.shimmer = 0.42f; req.tone = 0.52f; req.scan = 0;
+    req.durationSeconds = 4.0;
+
+    const auto a = OfflineRenderer::render(chord, req, dstRate);
+    const auto b = OfflineRenderer::render(chord, req, dstRate);
+    const double seconds = static_cast<double>(a.size() / 2) / dstRate;
+    float peak = 0; bool bad = false;
+    for (float v : a) { peak = std::max(peak, std::fabs(v)); if (std::isnan(v) || std::isinf(v)) bad = true; }
+    const float endDb = dbfs(rmsOf(std::vector<float>(a.end() - 960, a.end())));   // the last 10 ms
+    char d[160]; snprintf(d, sizeof d, "(4 s asked, %.1f s written, body %.1f dBFS, last 10 ms %.1f dBFS, peak %.3f)",
+                          seconds, rmsDbOver(a, dstRate, 1, 4), endDb, peak);
+    check(!bad && seconds > 6.0 && seconds <= 24.0 && rmsDbOver(a, dstRate, 1, 4) > -30 && endDb < -70 && peak <= 1.0f,
+          "OfflineRenderer + Observatory: body plus a reverb tail that fades to silence", d);
+    check(a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0,
+          "OfflineRenderer + Observatory: same request rendered twice is bit-identical");
+
+    // the same patch rendered live should be the same kind of thing: compare levels
+    auto g = std::make_unique<GrainEngine>();
+    g->configure(dstRate); g->setSource(&chord); applyStandingRoomOnly(*g);
+    const auto live = renderGrains(*g, dstRate, 7.0f);
+    snprintf(d, sizeof d, "(live %.1f dBFS, export %.1f dBFS)", rmsDbOver(live, dstRate, 4, 7), rmsDbOver(a, dstRate, 1, 4));
+    check(std::fabs(rmsDbOver(live, dstRate, 4, 7) - rmsDbOver(a, dstRate, 1, 4)) < 3.0f,
+          "OfflineRenderer + Observatory: the export is as loud as the live engine", d);
+}
+
+// ---------------------------------------------------- 10. Adaptive voice cap (M8)
 
 static void testAdaptiveVoiceCap() {
     Engine e;
@@ -803,6 +946,11 @@ int main() {
     testOfflineRenderBasics();
     testOfflineRenderDeterministic();
     testSeamlessLoopJoin();
+
+    printf("\n== Grooverider Observatory checks ==\n\n");
+    testObservatoryMode();
+    testModeSwitch();
+    testOfflineObservatory();
 
     printf("\n== Grooverider M8 polish checks ==\n\n");
     testAdaptiveVoiceCap();

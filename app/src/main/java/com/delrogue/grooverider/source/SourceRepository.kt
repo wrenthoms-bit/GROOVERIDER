@@ -4,7 +4,11 @@ import android.content.Context
 import android.net.Uri
 import com.delrogue.grooverider.engine.GrooveriderEngine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Orchestrates the source pipeline: decode/capture -> hash -> dedup -> store ->
@@ -23,6 +27,18 @@ class SourceRepository(context: Context) {
     suspend fun importAudio(uri: Uri, displayName: String): SourceRecord = withContext(Dispatchers.IO) {
         val audio = AudioDecoder.decode(appContext, uri)
         commit(audio, displayName)
+    }
+
+    /** A source bundled in the app's assets, decoded like any picked file. */
+    suspend fun importAsset(assetName: String, displayName: String): SourceRecord = withContext(Dispatchers.IO) {
+        // The decoder reads a Uri, so stage the asset as a file for the moment.
+        val staged = File(appContext.cacheDir, "factory-$assetName")
+        try {
+            appContext.assets.open(assetName).use { input -> staged.outputStream().use { input.copyTo(it) } }
+            commit(AudioDecoder.decode(appContext, Uri.fromFile(staged)), displayName)
+        } finally {
+            staged.delete()
+        }
     }
 
     /** Onboarding's demo source (spec M8): no file picker, no permission,
@@ -59,8 +75,18 @@ class SourceRepository(context: Context) {
      * been created yet (loadSource returns 0 frames in that case). */
     suspend fun loadIntoEngine(hash: String): Boolean = withContext(Dispatchers.IO) {
         val audio = store.readPcm(hash) ?: return@withContext false
-        GrooveriderEngine.loadSource(audio.samples, audio.channels, audio.sampleRate) > 0
+        val loaded = GrooveriderEngine.loadSource(audio.samples, audio.channels, audio.sampleRate) > 0
+        if (loaded) _engineSourceHash.value = hash
+        loaded
     }
 
     fun delete(hash: String) = store.delete(hash)
+
+    companion object {
+        private val _engineSourceHash = MutableStateFlow("")
+
+        /** The source the engine is playing right now, however it got there
+         * (picked on the Sources tab, or brought in by loading a Seed). */
+        val engineSourceHash: StateFlow<String> = _engineSourceHash.asStateFlow()
+    }
 }

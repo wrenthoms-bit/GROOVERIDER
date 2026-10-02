@@ -36,6 +36,7 @@ class RenderRepository(context: Context) {
         bpm: Int? = null,
         bars: Int? = null,
         seedId: String? = null,
+        name: String = SeedNaming.nameFor(masterSeed),
     ): File = withContext(Dispatchers.Default) {
         val audio = sourceStore.readPcm(sourceHash)
             ?: error("Source $sourceHash not found -- has it been deleted?")
@@ -45,18 +46,19 @@ class RenderRepository(context: Context) {
             grain.density, grain.timingJitter, grain.grainSizeMs, grain.sizeJitter,
             grain.position, grain.sprayMs, grain.drift, grain.pitchSt, grain.pitchSpraySt,
             grain.reverseProb, grain.spread, grain.outputWidth, grain.outputGain, grain.chaosRate,
+            grain.chaos, grain.pitchAmount, grain.key.toFloat(), grain.scale.toFloat(), grain.register,
+            grain.detune, if (grain.drone) 1f else 0f, grain.space, grain.shimmer, grain.tone, grain.scan,
         )
         val rendered = GrooveriderEngine.offlineRender(
             pcm = audio.samples, channels = audio.channels, srcRate = audio.sampleRate, dstRate = dstRate,
             params = params, windowType = grain.windowType, chaosEnabled = grain.chaosEnabled,
-            masterSeed = masterSeed, durationSeconds = durationSeconds,
+            observatory = grain.observatory, masterSeed = masterSeed, durationSeconds = durationSeconds,
             seamlessLoop = seamlessLoop, crossfadeSeconds = 0.05,
         )
 
-        val name = SeedNaming.nameFor(masterSeed)
         val shortHash = sourceHash.take(6)
         val filename = buildString {
-            append("GR_").append(name.replace(" ", ""))
+            append("GR_").append(name.replace(Regex("[^A-Za-z0-9]+"), ""))
             if (bpm != null) append("_").append(bpm).append("bpm")
             if (bars != null) append("_").append(bars).append("bars")
             append("_").append(shortHash).append(".wav")

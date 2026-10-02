@@ -32,8 +32,7 @@ enum ParamId : uint16_t {
     // --- Modulation & chaos (spec 4, M4) ---
     kChaosRate = 18,    // 0 .. 1, log-mapped to Lorenz dt
 
-    // --- Observatory (core/Observatory.h). Reserved here; the engine starts
-    // listening to them when the Observatory is wired in. ---
+    // --- Observatory (core/Observatory.h) ---
     kChaos       = 19,  // 0 .. 1, Lorenz rate and depth together
     kPitchAmount = 20,  // 0 .. 1, scatter range (or spray when the scale is free)
     kKey         = 21,  // 0 .. 11, C .. B
@@ -45,8 +44,9 @@ enum ParamId : uint16_t {
     kShimmer     = 27,  // 0 .. 1
     kTone        = 28,  // 0 .. 1, 500 Hz .. 18 kHz
     kScan        = 29,  // -1 .. +1
+    kObservatory = 30,  // 0 or 1: off = the core alone, as Seeds saved before the Observatory expect
 
-    kParamCount  = 30
+    kParamCount  = 31
 };
 
 } // namespace grvr

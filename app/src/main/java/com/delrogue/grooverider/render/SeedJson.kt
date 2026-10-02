@@ -37,6 +37,18 @@ object SeedJson {
             put("outputGain", grain.outputGain)
             put("chaosRate", grain.chaosRate)
             put("chaosEnabled", grain.chaosEnabled)
+            put("observatory", grain.observatory)
+            put("chaos", grain.chaos)
+            put("pitchAmount", grain.pitchAmount)
+            put("key", grain.key)
+            put("scale", grain.scale)
+            put("register", grain.register)
+            put("detune", grain.detune)
+            put("drone", grain.drone)
+            put("space", grain.space)
+            put("shimmer", grain.shimmer)
+            put("tone", grain.tone)
+            put("scan", grain.scan)
         }.toString()
 
     /** Returns null rather than throwing on anything malformed or foreign. */
@@ -62,6 +74,19 @@ object SeedJson {
                 outputGain = o.optDouble("outputGain", 0.9).toFloat(),
                 chaosRate = o.optDouble("chaosRate", 0.3).toFloat(),
                 chaosEnabled = o.optBoolean("chaosEnabled", true),
+                // absent in files written before the Observatory: off, and the rest at their defaults
+                observatory = o.optBoolean("observatory", false),
+                chaos = o.optDouble("chaos", 0.1).toFloat(),
+                pitchAmount = o.optDouble("pitchAmount", 0.15).toFloat(),
+                key = o.optInt("key", 0),
+                scale = o.optInt("scale", 0),
+                register = o.optDouble("register", 0.0).toFloat(),
+                detune = o.optDouble("detune", 0.05).toFloat(),
+                drone = o.optBoolean("drone", false),
+                space = o.optDouble("space", 0.5).toFloat(),
+                shimmer = o.optDouble("shimmer", 0.3).toFloat(),
+                tone = o.optDouble("tone", 0.7).toFloat(),
+                scan = o.optDouble("scan", 0.0).toFloat(),
             ),
         )
     }.getOrNull()

@@ -142,17 +142,20 @@ Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeCaptureSampleRate(J
 
 // --------------------------------------------------------------- offline render (M6)
 
-/// `params` (14 floats, in this order): density, timingJitter, grainSizeMs,
+/// `params` (25 floats, in this order): density, timingJitter, grainSizeMs,
 /// sizeJitter, position, sprayMs, drift, pitchSt, pitchSpraySt, reverseProb,
-/// spread, outputWidth, outputGain, chaosRate. Keep in sync with
-/// GrooveriderEngine.offlineRender's Kotlin-side packing.
+/// spread, outputWidth, outputGain, chaosRate, then the Observatory's chaos,
+/// pitchAmount, key, scale, register, detune, drone, space, shimmer, tone,
+/// scan. Keep in sync with GrooveriderEngine.offlineRender's Kotlin-side packing.
 JNIEXPORT jfloatArray JNICALL
 Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeOfflineRender(
         JNIEnv* env, jobject,
         jfloatArray pcm, jint channels, jint srcRate, jint dstRate,
-        jfloatArray params, jint windowType, jboolean chaosEnabled,
+        jfloatArray params, jint windowType, jboolean chaosEnabled, jboolean observatory,
         jlong masterSeed, jdouble durationSeconds, jboolean seamlessLoop, jdouble crossfadeSeconds) {
-    if (pcm == nullptr || channels < 1) return env->NewFloatArray(0);
+    constexpr jsize kParamFloats = 25;
+    if (pcm == nullptr || channels < 1 || params == nullptr || env->GetArrayLength(params) < kParamFloats)
+        return env->NewFloatArray(0);
 
     const jsize total = env->GetArrayLength(pcm);
     const int64_t frames = total / channels;
@@ -167,8 +170,8 @@ Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeOfflineRender(
                 interleaved[static_cast<size_t>(i * channels + c)];
     const grvr::SourceBuffer source(std::move(chans), srcRate);
 
-    jfloat p[14] = {};
-    env->GetFloatArrayRegion(params, 0, 14, p);
+    jfloat p[kParamFloats] = {};
+    env->GetFloatArrayRegion(params, 0, kParamFloats, p);
 
     grvr::RenderRequest req;
     req.masterSeed = static_cast<uint64_t>(masterSeed);
@@ -176,6 +179,10 @@ Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeOfflineRender(
     req.position = p[4]; req.sprayMs = p[5]; req.drift = p[6]; req.pitchSt = p[7];
     req.pitchSpraySt = p[8]; req.reverseProb = p[9]; req.spread = p[10];
     req.outputWidth = p[11]; req.outputGain = p[12]; req.chaosRate = p[13];
+    req.chaos = p[14]; req.pitchAmount = p[15]; req.key = p[16]; req.scale = p[17];
+    req.registerSt = p[18]; req.detune = p[19]; req.drone = p[20]; req.space = p[21];
+    req.shimmer = p[22]; req.tone = p[23]; req.scan = p[24];
+    req.observatory = (observatory == JNI_TRUE);
     req.windowType = static_cast<uint16_t>(windowType);
     req.chaosEnabled = (chaosEnabled == JNI_TRUE);
     req.durationSeconds = static_cast<double>(durationSeconds);

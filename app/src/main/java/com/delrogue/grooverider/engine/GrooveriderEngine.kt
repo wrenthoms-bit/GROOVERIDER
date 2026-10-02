@@ -52,6 +52,21 @@ object GrooveriderEngine {
     fun setChaosRate(v01: Float) = setParam(ParamId.CHAOS_RATE, v01)
     fun setChaosEnabled(on: Boolean) = nativeSetChaosEnabled(on)
 
+    // ---- Observatory (core/Observatory.h) ----------------------------------
+    /** Off = the plain grain engine, as Seeds saved before the Observatory expect. */
+    fun setObservatory(on: Boolean) = setParam(ParamId.OBSERVATORY, if (on) 1f else 0f)
+    fun setChaos(v01: Float) = setParam(ParamId.CHAOS, v01)
+    fun setPitchAmount(v01: Float) = setParam(ParamId.PITCH_AMOUNT, v01)
+    fun setKey(key: Int) = setParam(ParamId.KEY, key.toFloat())
+    fun setScale(scale: Int) = setParam(ParamId.SCALE, scale.toFloat())
+    fun setRegister(semitones: Float) = setParam(ParamId.REGISTER, semitones)
+    fun setDetune(semitones: Float) = setParam(ParamId.DETUNE, semitones)
+    fun setDrone(on: Boolean) = setParam(ParamId.DRONE, if (on) 1f else 0f)
+    fun setSpace(v01: Float) = setParam(ParamId.SPACE, v01)
+    fun setShimmer(v01: Float) = setParam(ParamId.SHIMMER, v01)
+    fun setTone(v01: Float) = setParam(ParamId.TONE, v01)
+    fun setScan(rate: Float) = setParam(ParamId.SCAN, rate)
+
     // ---- source preview (M1) ---------------------------------------------
     /**
      * Load interleaved float PCM as the preview source, resampling from
@@ -102,10 +117,13 @@ object GrooveriderEngine {
     fun captureSampleRate(): Int = nativeCaptureSampleRate()
 
     /**
-     * Renders offline at 2x oversample (spec 6.3). [params] is exactly 14
-     * floats in the order: density, timingJitter, grainSizeMs, sizeJitter,
-     * position, sprayMs, drift, pitchSt, pitchSpraySt, reverseProb, spread,
-     * outputWidth, outputGain, chaosRate.
+     * Renders offline (spec 6.3): at 2x oversample without the Observatory;
+     * with it, exactly as the live engine runs, plus the reverb tail. [params]
+     * is exactly [OFFLINE_PARAM_COUNT] floats in the order: density,
+     * timingJitter, grainSizeMs, sizeJitter, position, sprayMs, drift, pitchSt,
+     * pitchSpraySt, reverseProb, spread, outputWidth, outputGain, chaosRate,
+     * then the Observatory's chaos, pitchAmount, key, scale, register, detune,
+     * drone, space, shimmer, tone, scan.
      */
     fun offlineRender(
         pcm: FloatArray,
@@ -115,17 +133,20 @@ object GrooveriderEngine {
         params: FloatArray,
         windowType: Int,
         chaosEnabled: Boolean,
+        observatory: Boolean,
         masterSeed: Long,
         durationSeconds: Double,
         seamlessLoop: Boolean,
         crossfadeSeconds: Double,
     ): FloatArray {
-        require(params.size == 14) { "offlineRender params must have exactly 14 floats" }
+        require(params.size == OFFLINE_PARAM_COUNT) { "offlineRender params must have exactly $OFFLINE_PARAM_COUNT floats" }
         return nativeOfflineRender(
-            pcm, channels, srcRate, dstRate, params, windowType, chaosEnabled,
+            pcm, channels, srcRate, dstRate, params, windowType, chaosEnabled, observatory,
             masterSeed, durationSeconds, seamlessLoop, crossfadeSeconds,
         )
     }
+
+    const val OFFLINE_PARAM_COUNT = 25
 
     private const val MAX_GRAINS = 256
     private const val CLOUD_STRIDE = 5
@@ -169,7 +190,7 @@ object GrooveriderEngine {
     private external fun nativeCaptureSampleRate(): Int
     private external fun nativeOfflineRender(
         pcm: FloatArray, channels: Int, srcRate: Int, dstRate: Int,
-        params: FloatArray, windowType: Int, chaosEnabled: Boolean,
+        params: FloatArray, windowType: Int, chaosEnabled: Boolean, observatory: Boolean,
         masterSeed: Long, durationSeconds: Double, seamlessLoop: Boolean, crossfadeSeconds: Double,
     ): FloatArray
 

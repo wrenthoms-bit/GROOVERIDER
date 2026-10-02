@@ -37,6 +37,11 @@ public:
     void loadFirstLight() noexcept;
     void clearRoutes() noexcept { for (auto& r : routes_) r = ModRoute{}; }
 
+    /// While muted, every destination gets its base value and nothing else.
+    /// The Observatory brings its own chaos, so the matrix stands down while
+    /// it is on; the routes themselves are kept for when it goes off again.
+    void setRoutesMuted(bool muted) noexcept { routesMuted_ = muted; }
+
     /// One control tick (call at 1 kHz realtime / 4 kHz offline). Advances
     /// every source and pushes the combined value into `grains` for every
     /// destination.
@@ -63,6 +68,7 @@ private:
     ModRoute routes_[kModMatrixSlots];
     float    macros_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float    base_[kDestCount] = {};
+    bool     routesMuted_ = false;
 
     static constexpr float kControlRateHz = 1000.0f;
 };

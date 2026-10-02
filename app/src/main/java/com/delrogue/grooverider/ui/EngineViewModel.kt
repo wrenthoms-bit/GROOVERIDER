@@ -7,11 +7,16 @@ import com.delrogue.grooverider.audio.AudioEngineService
 import com.delrogue.grooverider.engine.EngineMeters
 import com.delrogue.grooverider.engine.GrainCloudSnapshot
 import com.delrogue.grooverider.engine.GrooveriderEngine
+import com.delrogue.grooverider.engine.ObservatoryMacros
+import com.delrogue.grooverider.onboarding.FactoryContent
+import com.delrogue.grooverider.onboarding.FactoryInstaller
 import com.delrogue.grooverider.render.RenderRepository
 import com.delrogue.grooverider.seed.SeedNaming
 import java.io.File
 import com.delrogue.grooverider.seed.Seed
 import com.delrogue.grooverider.seed.SeedRepository
+import com.delrogue.grooverider.seed.pushToEngine
+import com.delrogue.grooverider.AppPrefs
 import com.delrogue.grooverider.source.SourceRepository
 import com.delrogue.grooverider.telemetry.XrunTelemetry
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -50,6 +56,21 @@ data class GrainState(
     val outputGain: Float = 0.9f,
     val chaosRate: Float = 0.3f,
     val chaosEnabled: Boolean = true,
+
+    // Observatory (core/Observatory.h). Off by default: that is the plain grain
+    // engine every Seed saved before the Observatory existed was made on.
+    val observatory: Boolean = false,
+    val chaos: Float = 0.1f,
+    val pitchAmount: Float = 0.15f,
+    val key: Int = 0,             // 0 .. 11, C .. B
+    val scale: Int = 0,           // 0 free, chromatic, major, minor, pent-major, pent-minor, octaves+fifths
+    val register: Float = 0f,     // semitones
+    val detune: Float = 0.05f,    // semitones
+    val drone: Boolean = false,
+    val space: Float = 0.5f,
+    val shimmer: Float = 0.3f,
+    val tone: Float = 0.7f,
+    val scan: Float = 0f,
 )
 
 /** A frozen 60 s ring-buffer snapshot, awaiting keep/discard (spec 6.1). */
@@ -110,9 +131,12 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { _lineage.collect { flow.value = it.isNotEmpty() } }
     }
 
-    val seedName: StateFlow<String> = MutableStateFlow(SeedNaming.nameFor(1L)).also { flow ->
-        viewModelScope.launch { _masterSeed.collect { flow.value = SeedNaming.nameFor(it) } }
-    }
+    // The name of the Seed that was loaded, for as long as its master seed is
+    // still the one playing; after a re-roll the generated name takes over.
+    private val _loadedName = MutableStateFlow<String?>(null)
+    val seedName: StateFlow<String> = combine(_masterSeed, _loadedName) { seed, loaded ->
+        loaded ?: SeedNaming.nameFor(seed)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SeedNaming.nameFor(1L))
 
     private val _captureHint = MutableStateFlow<String?>(null)
     val captureHint: StateFlow<String?> = _captureHint.asStateFlow()
@@ -126,6 +150,23 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     private val xrunTelemetry = XrunTelemetry(app)
     private var pollJob: Job? = null
     private var cloudPollJob: Job? = null
+
+    /** Called once the main screen is up. Puts the bundled Big River and presets
+     * in the library if this install does not have them yet, and after
+     * onboarding opens on Standing Room Only. */
+    fun onAppReady() {
+        viewModelScope.launch {
+            try {
+                FactoryInstaller.ensure(getApplication())
+            } catch (e: Exception) {
+                _seedLoadError.value = "Couldn't install the factory presets: ${e.message}"
+                return@launch
+            }
+            if (AppPrefs.takeOpenOnDefaultPreset(getApplication())) {
+                seedRepo.getById(FactoryContent.STANDING_ROOM_ONLY_ID)?.let { loadSeed(it) }
+            }
+        }
+    }
 
     fun startEngine() {
         AudioEngineService.start(getApplication<Application>())
@@ -228,6 +269,21 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setChaosRate(v: Float) { _grain.value = _grain.value.copy(chaosRate = v); GrooveriderEngine.setChaosRate(v) }
     fun setChaosEnabled(on: Boolean) { _grain.value = _grain.value.copy(chaosEnabled = on); GrooveriderEngine.setChaosEnabled(on) }
 
+    // ---- Observatory ---------------------------------------------------------
+
+    fun setObservatory(on: Boolean) { _grain.value = _grain.value.copy(observatory = on); GrooveriderEngine.setObservatory(on) }
+    fun setChaos(v: Float) { _grain.value = _grain.value.copy(chaos = v); GrooveriderEngine.setChaos(v) }
+    fun setPitchAmount(v: Float) { _grain.value = _grain.value.copy(pitchAmount = v); GrooveriderEngine.setPitchAmount(v) }
+    fun setKey(v: Int) { _grain.value = _grain.value.copy(key = v); GrooveriderEngine.setKey(v) }
+    fun setScale(v: Int) { _grain.value = _grain.value.copy(scale = v); GrooveriderEngine.setScale(v) }
+    fun setRegister(v: Float) { _grain.value = _grain.value.copy(register = v); GrooveriderEngine.setRegister(v) }
+    fun setDetune(v: Float) { _grain.value = _grain.value.copy(detune = v); GrooveriderEngine.setDetune(v) }
+    fun setDrone(on: Boolean) { _grain.value = _grain.value.copy(drone = on); GrooveriderEngine.setDrone(on) }
+    fun setSpace(v: Float) { _grain.value = _grain.value.copy(space = v); GrooveriderEngine.setSpace(v) }
+    fun setShimmer(v: Float) { _grain.value = _grain.value.copy(shimmer = v); GrooveriderEngine.setShimmer(v) }
+    fun setTone(v: Float) { _grain.value = _grain.value.copy(tone = v); GrooveriderEngine.setTone(v) }
+    fun setScan(v: Float) { _grain.value = _grain.value.copy(scan = v); GrooveriderEngine.setScan(v) }
+
     /** Resets the grain/output controls to the neutral recall-default preset. */
     fun recallGrainDefaults() {
         _grain.value = _grain.value.copy(
@@ -248,25 +304,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         applyGrainToEngine()
     }
 
-    private fun applyGrainToEngine() {
-        val g = _grain.value
-        GrooveriderEngine.setGrainDensity(g.density)
-        GrooveriderEngine.setGrainTimingJitter(g.timingJitter)
-        GrooveriderEngine.setGrainSizeMs(g.grainSizeMs)
-        GrooveriderEngine.setGrainSizeJitter(g.sizeJitter)
-        GrooveriderEngine.setGrainPosition(g.position)
-        GrooveriderEngine.setGrainSprayMs(g.sprayMs)
-        GrooveriderEngine.setGrainDrift(g.drift)
-        GrooveriderEngine.setGrainPitchSt(g.pitchSt)
-        GrooveriderEngine.setGrainPitchSpraySt(g.pitchSpraySt)
-        GrooveriderEngine.setGrainReverseProb(g.reverseProb)
-        GrooveriderEngine.setGrainSpread(g.spread)
-        GrooveriderEngine.setGrainWindowType(g.windowType)
-        GrooveriderEngine.setOutputWidth(g.outputWidth)
-        GrooveriderEngine.setOutputGain(g.outputGain)
-        GrooveriderEngine.setChaosRate(g.chaosRate)
-        GrooveriderEngine.setChaosEnabled(g.chaosEnabled)
-    }
+    private fun applyGrainToEngine() = _grain.value.pushToEngine()
 
     // ---- Seed persistence (M3) ---------------------------------------------
 
@@ -275,6 +313,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
      * prohibition is on the signal path, not on how a fresh seed is chosen). */
     fun regenerateMasterSeed() {
         val s = Random.nextLong()
+        _loadedName.value = null
         _masterSeed.value = s
         GrooveriderEngine.setMasterSeed(s)
     }
@@ -292,6 +331,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         val stack = _lineage.value
         val previous = stack.lastOrNull() ?: return
         _lineage.value = stack.dropLast(1)
+        _loadedName.value = null
         _masterSeed.value = previous
         GrooveriderEngine.setMasterSeed(previous)
     }
@@ -316,7 +356,9 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
      * matches the grain particles' own plot (Y = pitch, up = transposed up). */
     fun onCanvasDrag(x01: Float, y01: Float) {
         setGrainPosition(x01.coerceIn(0f, 1f))
-        setGrainPitchSt((y01.coerceIn(0f, 1f) - 0.5f) * 48f)
+        val semitones = (y01.coerceIn(0f, 1f) - 0.5f) * 48f
+        // With the Observatory on, pitch is its job: the drag moves the register, in whole semitones.
+        if (_grain.value.observatory) setRegister(Math.round(semitones).toFloat()) else setGrainPitchSt(semitones)
     }
 
     fun onCanvasPinch(spread01Delta: Float) {
@@ -354,8 +396,11 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun discardCapture() { _captureReview.value = null }
 
     /** Offline re-render at HQ over the trimmed range (spec 6.1, 6.3). */
-    fun keepCapture(sourceHash: String, onRendered: (File) -> Unit) {
+    fun keepCapture(selectedSourceHash: String, onRendered: (File) -> Unit) {
         val c = _captureReview.value ?: return
+        // What the engine is actually playing: a Seed loaded from the Library
+        // brings its own source without it ever being picked on the Sources tab.
+        val sourceHash = SourceRepository.engineSourceHash.value.ifEmpty { selectedSourceHash }
         if (sourceHash.isEmpty()) {
             _captureHint.value = "No source loaded -- select one in the Sources tab first."
             return
@@ -369,6 +414,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
                 val file = renderRepo.renderCurrent(
                     sourceHash = sourceHash, masterSeed = _masterSeed.value, grain = _grain.value,
                     durationSeconds = durationSeconds, seamlessLoop = false,
+                    name = seedName.value,
                 )
                 _captureReview.value = null
                 onRendered(file)
@@ -384,9 +430,22 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     // Curated and non-linear so every position on every macro sounds good --
     // the antidote to a macro that can produce a bad sound (spec 5.4, 10).
 
+    // With the Observatory on they are the web app's four rings instead:
+    // TEXTURE its long-to-dense curve, DRIFT its chaos, PITCH its pitch amount,
+    // SPACE its reverb.
+
     fun setMacroTexture(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(texture = v)
+        if (_grain.value.observatory) {
+            val t = ObservatoryMacros.texture(v)
+            val g = ObservatoryMacros.effective(t.grainMs, t.density, t.timingJitter, _grain.value.scan, _grain.value.drone)
+            setGrainSizeMs(g.grainMs)
+            setGrainDensity(g.density)
+            setGrainTimingJitter(g.timingJitter)
+            setGrainSizeJitter(g.sizeJitter)
+            return
+        }
         val (grainSizeMs, density, jitter) = textureCurve(v)
         setGrainSizeMs(grainSizeMs)
         setGrainDensity(density)
@@ -396,6 +455,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacroDrift(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(drift = v)
+        if (_grain.value.observatory) { setChaos(v); return }
         // Exponential: the interesting territory is all in the bottom 20%.
         setChaosRate(v * v)
     }
@@ -403,6 +463,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacroPitch(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(pitch = v)
+        if (_grain.value.observatory) { setPitchAmount(v); return }
         // Detented: 0 unison, 0.25 chorus, 0.5 octaves, 0.75 octave+fifth, 1 wide scatter.
         setGrainPitchSpraySt(v * 24f)
     }
@@ -410,6 +471,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacroSpace(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(space = v)
+        if (_grain.value.observatory) { setSpace(v); return }
         setGrainSpread(v)
         setOutputWidth(v * 2f)
     }
@@ -466,7 +528,12 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
             }
             val g = seedRepo.apply(seed)
             _grain.value = g
+            _loadedName.value = seed.name
             _masterSeed.value = seed.masterSeed
+            if (g.observatory) {
+                // show the rings where the patch has them (TEXTURE has no single value to read back)
+                _macro.value = _macro.value.copy(drift = g.chaos, pitch = g.pitchAmount, space = g.space)
+            }
         }
     }
 

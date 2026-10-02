@@ -20,6 +20,16 @@ enum class MutableParam(val sensitivity: Float, val range: Float, val min: Float
     SPRAY(1.0f, 5000f, 0f, 5000f),
     PITCH_SPRAY(1.0f, 24f, 0f, 24f),
     SPREAD(1.0f, 1f, 0f, 1f),
+
+    // Observatory. Appended, so the lock bits above keep their positions. Key,
+    // scale, register, detune and drone are musical choices, not textures, and
+    // are never mutated (like window type).
+    CHAOS(0.5f, 1f, 0f, 1f),
+    PITCH_AMOUNT(0.7f, 1f, 0f, 1f),
+    SPACE(0.5f, 1f, 0f, 1f),
+    SHIMMER(0.7f, 1f, 0f, 1f),
+    TONE(0.5f, 1f, 0f, 1f),
+    SCAN(0.5f, 2f, -1f, 1f),
     ;
 
     fun isLocked(mask: Long): Boolean = (mask shr ordinal) and 1L == 1L
@@ -56,6 +66,12 @@ object SeedMutation {
             sprayMs = perturb(MutableParam.SPRAY, g.sprayMs),
             pitchSpraySt = perturb(MutableParam.PITCH_SPRAY, g.pitchSpraySt),
             spread = perturb(MutableParam.SPREAD, g.spread),
+            chaos = perturb(MutableParam.CHAOS, g.chaos),
+            pitchAmount = perturb(MutableParam.PITCH_AMOUNT, g.pitchAmount),
+            space = perturb(MutableParam.SPACE, g.space),
+            shimmer = perturb(MutableParam.SHIMMER, g.shimmer),
+            tone = perturb(MutableParam.TONE, g.tone),
+            scan = perturb(MutableParam.SCAN, g.scan),
             // output gain is never mutated (sensitivity 0.0, spec 3.6); windowType,
             // outputWidth and chaos params aren't in the spec's sensitivity table.
         )

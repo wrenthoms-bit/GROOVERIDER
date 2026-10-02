@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.delrogue.grooverider.onboarding.OnboardingScreen
 import com.delrogue.grooverider.ui.DebugPanelScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.delrogue.grooverider.ui.EngineViewModel
 import com.delrogue.grooverider.ui.cloud.CloudScreen
 import com.delrogue.grooverider.ui.library.SeedLibraryScreen
 import com.delrogue.grooverider.ui.source.SourceScreen
@@ -49,7 +51,11 @@ class MainActivity : ComponentActivity() {
                     return@GROOVERIDERTheme
                 }
 
-                LaunchedEffect(Unit) { ensurePermissions() }
+                val engineVm: EngineViewModel = viewModel()
+                LaunchedEffect(Unit) {
+                    ensurePermissions()
+                    engineVm.onAppReady()
+                }
 
                 var tab by remember { mutableIntStateOf(0) }
                 Scaffold(

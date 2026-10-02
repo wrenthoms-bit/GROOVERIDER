@@ -125,7 +125,8 @@ private:
     Smoother fade_;
     double   phase_        = 0.0;
     float    sampleRate_   = 48000.0f;
-    bool     ftzDone_      = false;
+    bool     ftzDone_      = false;   // first-callback thread setup (flush-to-zero, core pinning) done
+    uint64_t fastCores_    = 0;       // the device's fastest cores, found when the stream opens
     int32_t  lastXRun_     = 0;
     int32_t  bufferGrows_  = 0;
     int32_t  burstFrames_  = 192;

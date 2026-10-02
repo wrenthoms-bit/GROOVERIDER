@@ -9,6 +9,10 @@
 
 #include "../dsp/Denormal.h"
 
+#ifdef __ANDROID__
+#include <sched.h>
+#endif
+
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  "grvr", __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  "grvr", __VA_ARGS__)
 
@@ -20,6 +24,49 @@ constexpr float kTwoPi = 6.283185307179586f;
 const char* sharingName(oboe::SharingMode m) {
     return m == oboe::SharingMode::Exclusive ? "Exclusive" : "Shared";
 }
+/// The device's fastest cores as a bit mask (bit n = cpu n), or 0 if they are
+/// all alike or it cannot be read. Reads sysfs, so never call it from the
+/// audio thread.
+uint64_t fastCoreMask() {
+    uint64_t mask = 0;
+    long best = 0, slowest = 0;
+    for (int cpu = 0; cpu < 64; ++cpu) {
+        char path[80];
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+        FILE* f = fopen(path, "r");
+        if (!f) break;
+        long khz = 0;
+        if (fscanf(f, "%ld", &khz) != 1) khz = 0;
+        fclose(f);
+        if (khz > best) { best = khz; mask = 0; }
+        if (khz == best) mask |= (1ULL << cpu);
+        if (slowest == 0 || khz < slowest) slowest = khz;
+    }
+    return best > slowest ? mask : 0;
+}
+
+/// Keeps the calling thread on the given cores. On phones with big and little
+/// cores the scheduler is happy to leave the audio callback on a little one,
+/// where the same cloud costs several times as much of its deadline.
+///
+/// Called again every so often, not just once: Android re-homes an app's
+/// threads when the screen goes off or the app leaves the foreground, which
+/// silently undoes the pin. While the system will not allow the fast cores
+/// the call simply fails, and it takes again once they are allowed.
+void pinCallingThread(uint64_t mask) noexcept {
+#ifdef __ANDROID__
+    if (mask == 0) return;
+    const int cpu = sched_getcpu();
+    if (cpu >= 0 && cpu < 64 && (mask & (1ULL << cpu))) return;   // already on a fast core
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    for (int cpu = 0; cpu < 64; ++cpu) if (mask & (1ULL << cpu)) CPU_SET(cpu, &set);
+    sched_setaffinity(0, sizeof set, &set);   // 0 = this thread; best effort
+#else
+    (void)mask;
+#endif
+}
+
 const char* perfName(oboe::PerformanceMode m) {
     switch (m) {
         case oboe::PerformanceMode::LowLatency: return "LowLatency";
@@ -87,6 +134,7 @@ bool Engine::openStream() {
     stream_->setBufferSizeInFrames(burstFrames_ * kBurstsAtStart);
 
     configureSmoothers(sampleRate_);
+    fastCores_    = fastCoreMask();
     phase_        = 0.0;
     lastXRun_     = 0;
     bufferGrows_  = 0;
@@ -100,10 +148,10 @@ bool Engine::openStream() {
         return false;
     }
 
-    LOGI("stream open: %d Hz, burst %d, buffer %d, %s/%s, api=%s",
+    LOGI("stream open: %d Hz, burst %d, buffer %d, %s/%s, api=%s, fast cores 0x%llx",
          stream_->getSampleRate(), burstFrames_, stream_->getBufferSizeInFrames(),
          sharingName(stream_->getSharingMode()), perfName(stream_->getPerformanceMode()),
-         oboe::convertToText(stream_->getAudioApi()));
+         oboe::convertToText(stream_->getAudioApi()), static_cast<unsigned long long>(fastCores_));
     return true;
 }
 
@@ -181,6 +229,26 @@ void Engine::applyPendingParams() noexcept {
             case kOutputWidth: modEngine_.setBase(kDestOutputWidth, msg.value); break;
             case kOutputGain:  grainEngine_.setOutputGain(msg.value); break;
             case kChaosRate:   modEngine_.setBase(kDestChaosRate, msg.value); break;
+
+            // Observatory. Position, spray, spread and width reach it through
+            // the grain params above; these are the ones only it has.
+            case kChaos:       grainEngine_.setObsParam(grv::O_CHAOS, msg.value); break;
+            case kPitchAmount: grainEngine_.setObsParam(grv::O_PITCH, msg.value); break;
+            case kKey:         grainEngine_.setObsParam(grv::O_KEY, msg.value); break;
+            case kScale:       grainEngine_.setObsParam(grv::O_SCALE, msg.value); break;
+            case kRegister:    grainEngine_.setObsParam(grv::O_REGISTER, msg.value); break;
+            case kDetune:      grainEngine_.setObsParam(grv::O_DETUNE, msg.value); break;
+            case kDrone:       grainEngine_.setObsParam(grv::O_DRONE, msg.value); break;
+            case kSpace:       grainEngine_.setObsParam(grv::O_SPACE, msg.value); break;
+            case kShimmer:     grainEngine_.setObsParam(grv::O_SHIMMER, msg.value); break;
+            case kTone:        grainEngine_.setObsParam(grv::O_TONE, msg.value); break;
+            case kScan:        grainEngine_.setObsParam(grv::O_SCAN, msg.value); break;
+            case kObservatory: {
+                const bool on = msg.value > 0.5f;
+                grainEngine_.setObservatory(on);
+                modEngine_.setRoutesMuted(on);
+                break;
+            }
             default: break;
         }
     }
@@ -191,7 +259,7 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
                                               int32_t numFrames) {
     const auto t0 = std::chrono::steady_clock::now();
 
-    if (!ftzDone_) { enableFlushToZero(); ftzDone_ = true; }
+    if (!ftzDone_) { enableFlushToZero(); pinCallingThread(fastCores_); ftzDone_ = true; }
 
     applyPendingParams();
     fade_.setTarget(stopFade_.load(std::memory_order_acquire));
@@ -269,6 +337,7 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
     // --- adaptive buffer sizing, checked occasionally rather than every block
     if (--tuneCountdown_ <= 0) {
         tuneCountdown_ = kTuneInterval;
+        pinCallingThread(fastCores_);
         auto xr = stream->getXRunCount();
         if (xr) {
             const int32_t count = xr.value();
