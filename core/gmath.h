@@ -33,6 +33,22 @@ inline float gexp(float x){
 
 inline float gexp2(float x){ return gexp(x * LN2); }     // 2^x
 
+// ln(x) for x > 0: split x = m * 2^e with m in [sqrt(1/2), sqrt(2)), then
+// ln(m) = 2*atanh(s), s = (m-1)/(m+1), as an odd series to s^9 (~1e-7 abs).
+inline float glog(float x){
+    if (!(x > 1e-30f)) return -69.f;           // floor for zero / negative / tiny input
+    union { float f; unsigned int u; } bits;
+    bits.f = x;
+    int e = (int)((bits.u >> 23) & 0xFF) - 127;
+    bits.u = (bits.u & 0x007FFFFFu) | 0x3F800000u;   // mantissa as a float in [1, 2)
+    float m = bits.f;
+    if (m > 1.41421356f){ m *= 0.5f; ++e; }
+    float s = (m - 1.f) / (m + 1.f), s2 = s * s;
+    float p = s * (2.f + s2*(0.66666667f + s2*(0.4f + s2*(0.28571429f + s2*0.22222222f))));
+    return p + (float)e * LN2;
+}
+inline float gpow(float a, float b){ return a > 0.f ? gexp(b * glog(a)) : 0.f; }   // a^b, a >= 0
+
 // sin over any range: reduce to [-PI, PI], degree-7 minimax (odd poly).
 inline float gsin(float x){
     // fold to [-PI/2, PI/2]: sin(x) = (-1)^k sin(x - k*PI)

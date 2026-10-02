@@ -205,6 +205,9 @@ public:
 
     int   activeGrains() const { return activeCount_; }
     float sampleRate()   const { return sr_; }
+    int   frames()       const { return frames_; }
+    double playhead()    const { return playhead_; }          // in source frames
+    uint64_t grainIndex() const { return grainIndex_; }       // index the next grain will get
 
     // read-only introspection for hosts and tests
     const Grain& grainAt(int i) const { return pool_[i]; }

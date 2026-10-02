@@ -2,8 +2,9 @@
 #include <cstdint>
 
 #include "../mod/DriftGen.h"
+#include "Lorenz.h"   // core/ -- the one chaos integrator, shared with the Observatory
+
 #include "../mod/Lfo.h"
-#include "../mod/Lorenz.h"
 #include "../mod/ModMatrix.h"
 #include "GrainEngine.h"
 
@@ -41,16 +42,22 @@ public:
     /// destination.
     void tick(GrainEngine& grains) noexcept;
 
+    /// `chaosRate` in [0,1] maps the Lorenz step logarithmically over
+    /// 0.00002-0.005 time-units per control tick (spec 4.3) -- at the slow
+    /// end a single orbit takes minutes, which is the timescale a pad wants.
+    static float lorenzDt(float chaosRate01) noexcept;
+
     // Introspection for the 60-minute Lorenz stability test.
-    float lorenzRawX() const noexcept { return lorenz_.rawX(); }
-    float lorenzRawY() const noexcept { return lorenz_.rawY(); }
-    float lorenzRawZ() const noexcept { return lorenz_.rawZ(); }
+    float lorenzRawX() const noexcept { return lorenz_.x; }
+    float lorenzRawY() const noexcept { return lorenz_.y; }
+    float lorenzRawZ() const noexcept { return lorenz_.z; }
 
 private:
     float sourceValue(uint8_t source) const noexcept;
     void  applyDestination(uint8_t dest, float value, GrainEngine& grains) noexcept;
 
-    Lorenz   lorenz_;
+    grv::Lorenz lorenz_;
+    float    lorenzX0_ = 0.1f, lorenzY0_ = 0.1f, lorenzZ0_ = 0.1f;   // seeded start, and where an escape resets to
     DriftGen driftA_, driftB_, driftC_;
     Lfo      lfo1_, lfo2_;
     ModRoute routes_[kModMatrixSlots];

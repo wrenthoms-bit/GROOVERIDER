@@ -9,7 +9,12 @@ cd nativetest
 ./run.sh
 ```
 
-Exit code 0 means every check passed.
+Exit code 0 means every check passed. It builds and runs two programs:
+`test_engine.cpp` (the Android audio core) and `test_observatory.cpp` (the
+shared `core/Observatory.h`: a 10-minute Standing Room Only render, the reverb
+tail, determinism, and the same behaviour checks `webtests/engine.test.mjs`
+runs against the web app's JavaScript engine). The second takes about half a
+minute.
 
 ## What it checks
 

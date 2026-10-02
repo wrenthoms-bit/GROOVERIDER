@@ -25,3 +25,12 @@ echo "building with $CXX ..."
     -lpthread
 
 /tmp/grooverider_tests
+
+# The shared Observatory layer (core/Observatory.h). Includes a 10-minute
+# render, so this half takes about half a minute.
+"$CXX" -std=c++17 -O2 -Wall -Wextra -ffp-contract=off \
+    -I../core \
+    -o /tmp/grooverider_observatory_tests \
+    test_observatory.cpp
+
+/tmp/grooverider_observatory_tests

@@ -2,7 +2,6 @@
 #include "engine/GrainEngine.h"
 #include "engine/ModEngine.h"
 #include "engine/OfflineRenderer.h"
-#include "mod/Lorenz.h"
 #include "io/ParamRing.h"
 #include "io/SourceBuffer.h"
 #include "io/TripleBuffer.h"
@@ -610,20 +609,18 @@ static void testPanIndependentOfPitchSpray() {
 // ---------------------------------------------------- 7. Modulation & chaos (M4)
 
 static void testLorenzStability() {
-    Lorenz lorenz;
-    lorenz.seed(999);
+    grv::Lorenz lorenz;
+    lorenz.set(0.6f, 0.9f, 0.3f);
+    const float dt = ModEngine::lorenzDt(0.5f);
     bool bad = false;
     float maxAbs = 0.0f;
     // 60 simulated minutes at the 1 kHz control rate.
     constexpr int64_t ticks = 60LL * 60LL * 1000LL;
     for (int64_t i = 0; i < ticks; ++i) {
-        lorenz.step(0.5f);
-        const float x = lorenz.rawX(), y = lorenz.rawY(), z = lorenz.rawZ();
-        if (std::isnan(x) || std::isnan(y) || std::isnan(z) ||
-            std::isinf(x) || std::isinf(y) || std::isinf(z)) { bad = true; break; }
-        maxAbs = std::max({maxAbs, std::fabs(x), std::fabs(y), std::fabs(z)});
-        // The reset guard caps excursions at 100; anything above that escaped it.
-        if (maxAbs > 100.0f) { bad = true; break; }
+        lorenz.step(dt);
+        // ModEngine resets an escaped attractor; here an escape is the failure.
+        if (lorenz.escaped(100.0f, 100.0f, 100.0f)) { bad = true; break; }
+        maxAbs = std::max({maxAbs, std::fabs(lorenz.x), std::fabs(lorenz.y), std::fabs(lorenz.z)});
     }
     char detail[64]; snprintf(detail, sizeof detail, "(%lld ticks, max |state| %.1f)",
                               static_cast<long long>(ticks), maxAbs);
@@ -631,8 +628,8 @@ static void testLorenzStability() {
 }
 
 static void testChaosRateTimescale() {
-    const float dtMin = Lorenz::dtForRate(0.0f);
-    const float dtMax = Lorenz::dtForRate(1.0f);
+    const float dtMin = ModEngine::lorenzDt(0.0f);
+    const float dtMax = ModEngine::lorenzDt(1.0f);
     char detail[64]; snprintf(detail, sizeof detail, "(dtMin %.6f, dtMax %.6f)", dtMin, dtMax);
     // At the low end a single orbit should take minutes: dt this small means
     // thousands of 1kHz ticks (i.e. seconds of wall time) per unit of Lorenz

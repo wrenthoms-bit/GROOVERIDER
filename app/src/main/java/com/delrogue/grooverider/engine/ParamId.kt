@@ -30,4 +30,18 @@ object ParamId {
 
     // --- Modulation & chaos (spec 4, M4) ---
     const val CHAOS_RATE = 18    // 0 .. 1, log-mapped to Lorenz dt
+
+    // --- Observatory (core/Observatory.h). Reserved here; the engine starts
+    // listening to them when the Observatory is wired in. ---
+    const val CHAOS        = 19  // 0 .. 1, Lorenz rate and depth together
+    const val PITCH_AMOUNT = 20  // 0 .. 1, scatter range (or spray when the scale is free)
+    const val KEY          = 21  // 0 .. 11, C .. B
+    const val SCALE        = 22  // 0=free 1=chromatic 2=major 3=minor 4=pent-major 5=pent-minor 6=octaves+fifths
+    const val REGISTER     = 23  // -24 .. +24 semitones
+    const val DETUNE       = 24  // 0 .. 1 semitones
+    const val DRONE        = 25  // 0 or 1
+    const val SPACE        = 26  // 0 .. 1, room .. ocean
+    const val SHIMMER      = 27  // 0 .. 1
+    const val TONE         = 28  // 0 .. 1, 500 Hz .. 18 kHz
+    const val SCAN         = 29  // -1 .. +1
 }

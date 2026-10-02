@@ -32,7 +32,21 @@ enum ParamId : uint16_t {
     // --- Modulation & chaos (spec 4, M4) ---
     kChaosRate = 18,    // 0 .. 1, log-mapped to Lorenz dt
 
-    kParamCount  = 19
+    // --- Observatory (core/Observatory.h). Reserved here; the engine starts
+    // listening to them when the Observatory is wired in. ---
+    kChaos       = 19,  // 0 .. 1, Lorenz rate and depth together
+    kPitchAmount = 20,  // 0 .. 1, scatter range (or spray when the scale is free)
+    kKey         = 21,  // 0 .. 11, C .. B
+    kScale       = 22,  // 0=free 1=chromatic 2=major 3=minor 4=pent-major 5=pent-minor 6=octaves+fifths
+    kRegister    = 23,  // -24 .. +24 semitones
+    kDetune      = 24,  // 0 .. 1 semitones
+    kDrone       = 25,  // 0 or 1
+    kSpace       = 26,  // 0 .. 1, room .. ocean
+    kShimmer     = 27,  // 0 .. 1
+    kTone        = 28,  // 0 .. 1, 500 Hz .. 18 kHz
+    kScan        = 29,  // -1 .. +1
+
+    kParamCount  = 30
 };
 
 } // namespace grvr
