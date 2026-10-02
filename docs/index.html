@@ -871,6 +871,7 @@ async function setPlaying(on){
 
 // ---- source loading ----
 let waveform = null;
+let libCur = '', libNext = '';                 // library entry now loaded / about to load ('' = not from the library)
 async function loadChannels(chL, chR, frames, channels, name){
   await ensureAudio();
   frames = Math.min(frames, 48000*60);                      // core cap (MAX_FRAMES)
@@ -880,6 +881,7 @@ async function loadChannels(chL, chR, frames, channels, name){
   const lBuf = l.slice().buffer, rBuf = channels>1 ? r.slice().buffer : null;
   node.port.postMessage({type:'source', channels, frames, l:lBuf, r:rBuf, position:val('p_position')}, rBuf ? [lBuf, rBuf] : [lBuf]);
   $('srcname').textContent = name;
+  libCur = libNext; libNext = ''; $('library').value = libCur;   // the menu names the loaded library sample (blank for imports / mic)
   const buckets = 400, w = new Float32Array(buckets);
   for (let b=0;b<buckets;b++){ const s=(b*frames/buckets)|0, e=((b+1)*frames/buckets)|0; let pk=0;
     for (let i=s;i<e;i++){ const a=Math.abs(l[i]); if (a>pk) pk=a; } w[b]=pk; }
@@ -919,6 +921,7 @@ async function makeDemo(){
   }
   let pk = 1e-6; for (let i=0;i<N;i++){ const a=Math.abs(l[i]), b=Math.abs(r[i]); if(a>pk)pk=a; if(b>pk)pk=b; }
   const k = 0.5/pk; for (let i=0;i<N;i++){ l[i]*=k; r[i]*=k; }
+  libNext = '0';
   await loadChannels(l, r, N, 2, 'demo pad (C)');
 }
 
@@ -1072,13 +1075,16 @@ async function loadSample(i){
     if (!s.file){ await makeDemo(); setStatus('Loaded '+s.name+'.'); return; }
     setStatus('Loading '+s.name+' …');
     const res = await fetch(s.file); if (!res.ok) throw new Error('HTTP '+res.status);
-    await decodeArrayBuffer(await res.arrayBuffer(), s.name);
+    const ab = await res.arrayBuffer();
+    libNext = String(i);
+    await decodeArrayBuffer(ab, s.name);
     setStatus('Loaded '+s.name+'.');
   } catch(err){
+    libNext = ''; $('library').value = libCur;
     setStatus('Could not load '+s.name+(location.protocol==='file:' ? ' — library samples need the page served over http(s), not opened as a file.' : ' ('+(err && err.message || err)+').'));
   }
 }
-$('library').addEventListener('change', ()=>{ const v = $('library').value; $('library').value = ''; if (v !== '') loadSample(+v); });
+$('library').addEventListener('change', ()=>{ const v = $('library').value; $('library').value = libCur; if (v !== '') loadSample(+v); });
 $('loadFile').addEventListener('click', ()=>$('file').click());
 async function loadFile(f){
   if (!f) return; openGate(); setStatus('Decoding '+f.name+' …');
