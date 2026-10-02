@@ -19,6 +19,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import com.delrogue.grooverider.ui.theme.Abyss
+import com.delrogue.grooverider.ui.theme.Dim
+import com.delrogue.grooverider.ui.theme.Panel
+import com.delrogue.grooverider.ui.theme.PanelCard
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -85,8 +91,9 @@ fun DebugPanelScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(Abyss)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Row(
@@ -94,14 +101,12 @@ fun DebugPanelScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("GROOVERIDER", style = MaterialTheme.typography.headlineMedium)
+            Column {
+                Text("Engine", color = Color.White, style = MaterialTheme.typography.headlineMedium)
+                Text("Raw controls and diagnostics", color = Dim, style = MaterialTheme.typography.bodySmall)
+            }
             HelpButton(onClick = { showHelp = true })
         }
-        Text(
-            "M0 — Skeleton & Signal Path",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
 
         // ---- transport ----------------------------------------------------
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -124,7 +129,7 @@ fun DebugPanelScreen(
         )
 
         // ---- stream readout -----------------------------------------------
-        Card(colors = CardDefaults.cardColors()) {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 SectionLabel("Granted stream")
                 Mono(config)
@@ -138,7 +143,7 @@ fun DebugPanelScreen(
         }
 
         // ---- tone controls -------------------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("Test tone")
 
@@ -181,7 +186,7 @@ fun DebugPanelScreen(
         }
 
         // ---- grain engine (M2) ---------------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -237,7 +242,7 @@ fun DebugPanelScreen(
         }
 
         // ---- modulation & chaos (M4) ----------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("Modulation & chaos")
                 Row(
@@ -267,7 +272,7 @@ fun DebugPanelScreen(
         ObservatoryCard(grain, vm, running)
 
         // ---- Seed persistence (M3) ------------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("Seed")
                 Row(
@@ -384,7 +389,7 @@ private fun MeterReadouts(meters: State<EngineMeters>) {
 /** Raw controls for core/Observatory.h -- the proper performance controls come later. */
 @Composable
 private fun ObservatoryCard(grain: GrainState, vm: EngineViewModel, enabled: Boolean) {
-    Card {
+    PanelCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionLabel("Observatory")
             Row(
@@ -435,17 +440,15 @@ private fun SoakCard(running: Boolean, elapsedSeconds: Long, xrunsAtStart: Long,
     val passed = elapsedSeconds >= SOAK_TARGET_SECONDS && xrunsThisRun == 0
     val failed = xrunsThisRun > 0
 
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                passed -> MaterialTheme.colorScheme.primaryContainer
-                failed -> MaterialTheme.colorScheme.errorContainer
-                else -> MaterialTheme.colorScheme.surfaceVariant
-            }
-        )
+    PanelCard(
+        containerColor = when {
+            passed -> MaterialTheme.colorScheme.secondaryContainer
+            failed -> MaterialTheme.colorScheme.errorContainer
+            else -> Panel
+        },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("M0 acceptance — 10 minutes, zero xRuns")
+            SectionLabel("Soak test — 10 minutes, zero xRuns")
             Text(
                 when {
                     !running -> "Not running"

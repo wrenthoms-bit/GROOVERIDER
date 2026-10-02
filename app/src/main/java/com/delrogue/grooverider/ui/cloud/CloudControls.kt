@@ -58,14 +58,20 @@ import androidx.compose.ui.unit.dp
 import com.delrogue.grooverider.midi.KeyboardChord
 import com.delrogue.grooverider.midi.MidiTarget
 import com.delrogue.grooverider.onboarding.FactoryContent
+import com.delrogue.grooverider.ui.theme.Abyss
+import com.delrogue.grooverider.ui.theme.Amber
+import com.delrogue.grooverider.ui.theme.Cyan
+import com.delrogue.grooverider.ui.theme.Dim
+import com.delrogue.grooverider.ui.theme.Ink
+import com.delrogue.grooverider.ui.theme.OnAccent
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
-internal val kAmber = Color(0xFFE8A857)
-internal val kCyan = Color(0xFF62D0DC)
-internal val kInk = Color(0xFFC9D6DA)
-internal val kDim = Color(0xFF8A979B)
-private val kPanel = Color(0xFF05090B)
+internal val kAmber = Amber
+internal val kCyan = Cyan
+internal val kInk = Ink
+internal val kDim = Dim
+private val kPanel = Abyss
 
 /** A light tick: a detent passed, a step taken. */
 internal fun HapticFeedback.tick() = performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -160,7 +166,7 @@ fun DroneButton(on: Boolean, enabled: Boolean, armed: Boolean, onToggle: () -> U
     val shape = RoundedCornerShape(50)
     Text(
         if (armed) "hit a pad…" else "DRONE",
-        color = if (on) Color(0xFF14100A) else kInk,
+        color = if (on) OnAccent else kInk,
         style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
         modifier = modifier
             .alpha(if (enabled) 1f else 0.4f)
@@ -292,7 +298,7 @@ fun DetailPanel(
                 for ((mode, name) in listOf(KeyboardChord.Mode.OFF to "Off", KeyboardChord.Mode.LATCH to "Latch", KeyboardChord.Mode.GATE to "Gate")) {
                     val selected = mode == keysMode
                     Text(
-                        name, color = if (selected) Color(0xFF14100A) else kInk, style = MaterialTheme.typography.labelLarge,
+                        name, color = if (selected) OnAccent else kInk, style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier
                             .background(if (selected) kCyan else Color.Transparent, RoundedCornerShape(50))
                             .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
