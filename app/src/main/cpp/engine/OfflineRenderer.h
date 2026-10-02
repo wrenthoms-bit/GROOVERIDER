@@ -26,6 +26,8 @@ struct RenderRequest {
     bool  observatory = false;
     float chaos = 0.1f, pitchAmount = 0.15f, key = 0.0f, scale = 0.0f, registerSt = 0.0f, detune = 0.05f;
     float drone = 0.0f, space = 0.5f, shimmer = 0.3f, tone = 0.7f, scan = 0.0f;
+    float notes[16] = {};      // held keyboard notes, semitones from middle C
+    int32_t noteCount = 0;
 
     double durationSeconds = 60.0;
 

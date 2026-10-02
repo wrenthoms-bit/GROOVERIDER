@@ -250,6 +250,20 @@ void Engine::applyPendingParams() noexcept {
                 modEngine_.setRoutesMuted(on);
                 break;
             }
+
+            case kNotesBegin:
+                pendingNoteCount_ = std::clamp(static_cast<int32_t>(msg.value + 0.5f), 0,
+                                               static_cast<int32_t>(grv::OBS_MAX_NOTES));
+                pendingNotesGot_ = 0;
+                if (pendingNoteCount_ == 0) grainEngine_.setNotes(pendingNotes_, 0);
+                break;
+            case kNoteValue:
+                if (pendingNotesGot_ < pendingNoteCount_) {
+                    pendingNotes_[pendingNotesGot_++] = msg.value;
+                    if (pendingNotesGot_ == pendingNoteCount_) grainEngine_.setNotes(pendingNotes_, pendingNoteCount_);
+                }
+                break;
+            case kPlaying: grainEngine_.setPlaying(msg.value > 0.5f); break;
             default: break;
         }
     }

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -165,7 +166,7 @@ JNIEXPORT jfloatArray JNICALL
 Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeOfflineRender(
         JNIEnv* env, jobject,
         jfloatArray pcm, jint channels, jint srcRate, jint dstRate,
-        jfloatArray params, jint windowType, jboolean chaosEnabled, jboolean observatory,
+        jfloatArray params, jfloatArray notes, jint windowType, jboolean chaosEnabled, jboolean observatory,
         jlong masterSeed, jdouble durationSeconds, jboolean seamlessLoop, jdouble crossfadeSeconds) {
     constexpr jsize kParamFloats = 25;
     if (pcm == nullptr || channels < 1 || params == nullptr || env->GetArrayLength(params) < kParamFloats)
@@ -197,6 +198,10 @@ Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeOfflineRender(
     req.registerSt = p[18]; req.detune = p[19]; req.drone = p[20]; req.space = p[21];
     req.shimmer = p[22]; req.tone = p[23]; req.scan = p[24];
     req.observatory = (observatory == JNI_TRUE);
+    if (notes != nullptr) {
+        req.noteCount = std::min<jsize>(env->GetArrayLength(notes), 16);
+        env->GetFloatArrayRegion(notes, 0, req.noteCount, req.notes);
+    }
     req.windowType = static_cast<uint16_t>(windowType);
     req.chaosEnabled = (chaosEnabled == JNI_TRUE);
     req.durationSeconds = static_cast<double>(durationSeconds);

@@ -56,6 +56,7 @@ std::vector<float> renderWithObservatory(const SourceBuffer& source, const Rende
     grains.setObsParam(grv::O_DRONE, req.drone);       grains.setObsParam(grv::O_SPACE, req.space);
     grains.setObsParam(grv::O_SHIMMER, req.shimmer);   grains.setObsParam(grv::O_TONE, req.tone);
     grains.setObsParam(grv::O_SCAN, req.scan);
+    grains.setNotes(req.notes, req.noteCount);
     mod.tick(grains);                 // hands position, spray, spread and width over before the mode starts
     grains.setObservatory(true);
 

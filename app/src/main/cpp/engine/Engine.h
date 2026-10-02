@@ -172,6 +172,11 @@ private:
     static constexpr int32_t kMaxBlockFrames = 8192;
     float grainMix_[kMaxBlockFrames * 2] = {};
 
+    // a chord on its way in through the param ring (kNotesBegin / kNoteValue)
+    float   pendingNotes_[grv::OBS_MAX_NOTES] = {};
+    int32_t pendingNoteCount_ = 0;
+    int32_t pendingNotesGot_  = 0;
+
     int32_t controlPeriodSamples_ = 48;   // 1 kHz control rate (spec 4.3)
     int32_t controlCountdown_     = 0;
 

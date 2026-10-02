@@ -1,6 +1,8 @@
 package com.delrogue.grooverider.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,6 +32,7 @@ fun HelpDialog(title: String, body: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Got it") } },
         title = { Text(title) },
-        text = { Text(body) },
+        // long help scrolls, so a sideways phone can still reach the end of it
+        text = { Text(body, Modifier.verticalScroll(rememberScrollState())) },
     )
 }

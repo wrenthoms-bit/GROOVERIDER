@@ -67,6 +67,21 @@ object GrooveriderEngine {
     fun setTone(v01: Float) = setParam(ParamId.TONE, v01)
     fun setScan(rate: Float) = setParam(ParamId.SCAN, rate)
 
+    /**
+     * Held keyboard notes, as semitones from middle C (at most 16). Each new
+     * grain takes one of them as its pitch centre; an empty list returns the
+     * cloud to key + register.
+     */
+    fun setNotes(semitones: List<Float>) {
+        val notes = semitones.take(MAX_NOTES)
+        setParam(ParamId.NOTES_BEGIN, notes.size.toFloat())
+        notes.forEach { setParam(ParamId.NOTE_VALUE, it) }
+    }
+    const val MAX_NOTES = 16
+
+    /** Off stops new grains: those sounding finish and the space rings on. */
+    fun setPlaying(on: Boolean) = setParam(ParamId.PLAYING, if (on) 1f else 0f)
+
     // ---- source preview (M1) ---------------------------------------------
     /**
      * Load interleaved float PCM as the preview source, resampling from
@@ -143,6 +158,7 @@ object GrooveriderEngine {
         srcRate: Int,
         dstRate: Int,
         params: FloatArray,
+        notes: FloatArray,
         windowType: Int,
         chaosEnabled: Boolean,
         observatory: Boolean,
@@ -153,7 +169,7 @@ object GrooveriderEngine {
     ): FloatArray {
         require(params.size == OFFLINE_PARAM_COUNT) { "offlineRender params must have exactly $OFFLINE_PARAM_COUNT floats" }
         return nativeOfflineRender(
-            pcm, channels, srcRate, dstRate, params, windowType, chaosEnabled, observatory,
+            pcm, channels, srcRate, dstRate, params, notes, windowType, chaosEnabled, observatory,
             masterSeed, durationSeconds, seamlessLoop, crossfadeSeconds,
         )
     }
@@ -203,7 +219,7 @@ object GrooveriderEngine {
     private external fun nativeCaptureSampleRate(): Int
     private external fun nativeOfflineRender(
         pcm: FloatArray, channels: Int, srcRate: Int, dstRate: Int,
-        params: FloatArray, windowType: Int, chaosEnabled: Boolean, observatory: Boolean,
+        params: FloatArray, notes: FloatArray, windowType: Int, chaosEnabled: Boolean, observatory: Boolean,
         masterSeed: Long, durationSeconds: Double, seamlessLoop: Boolean, crossfadeSeconds: Double,
     ): FloatArray
 

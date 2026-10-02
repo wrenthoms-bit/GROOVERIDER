@@ -30,6 +30,17 @@ object ObservatoryMacros {
         )
     }
 
+    /** The TEXTURE setting whose grain size is nearest [grainMs] -- for showing a ring where a loaded patch sits. */
+    fun textureFor(grainMs: Float): Float {
+        var best = 0f; var bestDistance = Float.MAX_VALUE
+        for (i in 0..200) {
+            val v = i / 200f
+            val distance = kotlin.math.abs(kotlin.math.ln(texture(v).grainMs / grainMs.coerceAtLeast(1f)))
+            if (distance < bestDistance) { bestDistance = distance; best = v }
+        }
+        return best
+    }
+
     data class Grains(val grainMs: Float, val density: Float, val timingJitter: Float, val sizeJitter: Float, val scan: Float)
 
     /**

@@ -106,6 +106,12 @@ public:
         obsParams_[id] = v;
         if (obsOn_) obs_->setParam(id, v);
     }
+    /// Held keyboard notes, in semitones from middle C; none = key + register.
+    void setNotes(const float* semis, int32_t n) noexcept {
+        noteCount_ = std::clamp(n, 0, static_cast<int32_t>(grv::OBS_MAX_NOTES));
+        for (int32_t i = 0; i < noteCount_; ++i) notes_[i] = semis[i];
+        if (obsOn_) obs_->setNotes(notes_, noteCount_);
+    }
 
     // --- discrete: applied at the next grain spawn, never mid-grain (spec 2.8)
     void setWindowType(uint16_t w) noexcept { core_.setParam(grv::P_WINDOW, static_cast<float>(coreWindow(w))); }
@@ -242,6 +248,7 @@ private:
         if (on) {
             obs_->init(sampleRate_);                 // empties the reverb: no tail left over from last time
             for (int i = 0; i < grv::O_COUNT; ++i) obs_->setParam(i, obsParams_[i]);
+            obs_->setNotes(notes_, noteCount_);
             obs_->setSeed(obsSeed_);
         }
         // Either way the cloud restarts where the position control says. Coming
@@ -269,6 +276,8 @@ private:
     bool    obsWanted_     = false;
     uint64_t obsSeed_      = 0;
     float   obsParams_[grv::O_COUNT];   // what the Observatory was last asked for, kept across mode changes
+    float   notes_[grv::OBS_MAX_NOTES] = {};
+    int32_t noteCount_     = 0;
     float   fadeGain_      = 1.0f;
     float   fadeStep_      = 1.0f / 480.0f;
     int     fadeDir_       = 0;          // -1 fading out, +1 fading in, 0 steady

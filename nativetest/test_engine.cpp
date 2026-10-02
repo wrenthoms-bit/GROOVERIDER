@@ -14,6 +14,7 @@
 #include <cstring>
 #include <memory>
 #include <random>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -902,6 +903,55 @@ static void testOfflineObservatory() {
           "OfflineRenderer + Observatory: the export is as loud as the live engine", d);
 }
 
+static void testKeyboardNotes() {
+    // The whole path the app uses: params through the ring into a running Engine.
+    Engine e;
+    oboe::AudioStream fake;
+    e.start();
+    auto chord = std::make_shared<SourceBuffer>(makeChordSource(48000 * 4, 48000));
+    e.setSource(chord);
+    e.setParam(kGrainDensity, 80.0f); e.setParam(kGrainSizeMs, 300.0f); e.setParam(kGrainReverseProb, 0.0f);
+    e.setParam(kScale, 0.0f); e.setParam(kPitchAmount, 0.0f); e.setParam(kDetune, 0.0f); e.setParam(kChaos, 0.0f);
+    e.setParam(kObservatory, 1.0f);
+    e.setParam(kNotesBegin, 3.0f); e.setParam(kNoteValue, 0.0f); e.setParam(kNoteValue, 7.0f); e.setParam(kNoteValue, -12.0f);
+
+    std::vector<float> out;
+    auto pitches = [&](int blocks) {
+        std::set<int> cents;
+        GrainCloudSnapshot snap;
+        for (int b = 0; b < blocks; ++b) {
+            out.clear(); renderBlocks(e, &fake, out, 1, 192);
+            if (b % 25) continue;
+            e.pollCloud(snap);
+            for (int i = 0; i < snap.count; ++i)
+                cents.insert(static_cast<int>(std::lround(1200.0 * std::log2(std::fabs(snap.grains[i].pitchRatio)))));
+        }
+        return cents;
+    };
+    (void)pitches(500);                                  // let the mode change and the first cloud settle
+    const auto held = pitches(1500);
+    char d[96]; int n = 0; d[0] = 0;
+    for (int c : held) n += snprintf(d + n, sizeof d - static_cast<size_t>(n), "%s%d", n ? " " : "(", c / 100);
+    snprintf(d + n, sizeof d - static_cast<size_t>(n), " st)");
+    check(held == std::set<int>({-1200, 0, 700}), "Keys: a chord sent through the param ring puts the grains on its notes", d);
+
+    e.setParam(kNotesBegin, 0.0f);                       // chord cleared: back to key + register
+    e.setParam(kKey, 5.0f); e.setParam(kRegister, 0.0f);
+    (void)pitches(600);
+    const auto cleared = pitches(600);
+    check(cleared == std::set<int>({500}), "Keys: clearing the chord returns the cloud to key + register");
+
+    e.setParam(kPlaying, 0.0f);                          // gate closed: no new grains
+    out.clear(); renderBlocks(e, &fake, out, 400, 192);
+    Meters m; e.pollMeters(m);
+    check(m.activeVoices == 0, "Keys: playing off lets the cloud run out");
+    e.setParam(kPlaying, 1.0f);
+    out.clear(); renderBlocks(e, &fake, out, 200, 192);
+    e.pollMeters(m);
+    check(m.activeVoices > 5, "Keys: playing on brings it back");
+    e.stop();
+}
+
 // ---------------------------------------------------- 10. Spectrum for the visuals
 
 static void testSpectrum() {
@@ -979,6 +1029,7 @@ int main() {
     testObservatoryMode();
     testModeSwitch();
     testOfflineObservatory();
+    testKeyboardNotes();
 
     testSpectrum();
 

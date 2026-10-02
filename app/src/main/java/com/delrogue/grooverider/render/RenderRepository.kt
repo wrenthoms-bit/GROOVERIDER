@@ -37,6 +37,7 @@ class RenderRepository(context: Context) {
         bars: Int? = null,
         seedId: String? = null,
         name: String = SeedNaming.nameFor(masterSeed),
+        notes: List<Float> = emptyList(),      // held keyboard notes, semitones from middle C
     ): File = withContext(Dispatchers.Default) {
         val audio = sourceStore.readPcm(sourceHash)
             ?: error("Source $sourceHash not found -- has it been deleted?")
@@ -51,7 +52,7 @@ class RenderRepository(context: Context) {
         )
         val rendered = GrooveriderEngine.offlineRender(
             pcm = audio.samples, channels = audio.channels, srcRate = audio.sampleRate, dstRate = dstRate,
-            params = params, windowType = grain.windowType, chaosEnabled = grain.chaosEnabled,
+            params = params, notes = notes.take(GrooveriderEngine.MAX_NOTES).toFloatArray(), windowType = grain.windowType, chaosEnabled = grain.chaosEnabled,
             observatory = grain.observatory, masterSeed = masterSeed, durationSeconds = durationSeconds,
             seamlessLoop = seamlessLoop, crossfadeSeconds = 0.05,
         )

@@ -9,6 +9,7 @@ object AppPrefs {
     private const val KEY_ONBOARDED = "onboarded"
     private const val KEY_FACTORY_CONTENT = "factory_content_version"
     private const val KEY_OPEN_ON_DEFAULT = "open_on_default_preset"
+    private const val KEY_MIDI_BINDINGS = "midi_bindings"
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -23,6 +24,13 @@ object AppPrefs {
 
     fun setFactoryContentVersion(context: Context, version: Int) {
         prefs(context).edit().putInt(KEY_FACTORY_CONTENT, version).apply()
+    }
+
+    /** MIDI-learn mappings, in MidiBindings' text form. */
+    fun midiBindings(context: Context): String = prefs(context).getString(KEY_MIDI_BINDINGS, "") ?: ""
+
+    fun setMidiBindings(context: Context, encoded: String) {
+        prefs(context).edit().putString(KEY_MIDI_BINDINGS, encoded).apply()
     }
 
     /** Set by onboarding: the main screen should open playing the default preset, once. */

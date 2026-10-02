@@ -381,9 +381,6 @@ private fun MeterReadouts(meters: State<EngineMeters>) {
     Readout("Active grains", "${m.activeVoices}")
 }
 
-private val KEY_NAMES = listOf("C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B")
-private val SCALE_NAMES = listOf("Free", "Chromatic", "Major", "Minor", "Pentatonic", "Minor pent", "Octaves + 5ths")
-
 /** Raw controls for core/Observatory.h -- the proper performance controls come later. */
 @Composable
 private fun ObservatoryCard(grain: GrainState, vm: EngineViewModel, enabled: Boolean) {

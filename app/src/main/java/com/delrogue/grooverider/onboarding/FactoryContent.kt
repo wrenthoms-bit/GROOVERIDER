@@ -27,6 +27,7 @@ object FactoryContent {
         val subtitle: String,
         val masterSeed: Long,
         val grain: GrainState,
+        val texture: Float,          // where its TEXTURE ring sits
     )
 
     const val STANDING_ROOM_ONLY_ID = "factory-standing-room-only"
@@ -91,7 +92,7 @@ object FactoryContent {
         val jitter = ObservatoryMacros.texture(texture).timingJitter
         val g = ObservatoryMacros.effective(grainMs, density, jitter, scan, drone)
         return Preset(
-            id = id, name = name, subtitle = subtitle,
+            id = id, name = name, subtitle = subtitle, texture = texture,
             masterSeed = (seedHi shl 32) or seedLo,
             grain = GrainState(
                 density = g.density, timingJitter = g.timingJitter, grainSizeMs = g.grainMs, sizeJitter = g.sizeJitter,
