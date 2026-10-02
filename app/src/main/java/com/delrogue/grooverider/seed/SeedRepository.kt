@@ -93,30 +93,46 @@ class SeedRepository(context: Context) {
         child
     }
 
-    suspend fun importSeedFile(json: String): Seed? = withContext(Dispatchers.IO) {
-        SeedFileIO.import(json)?.also { dao.upsert(it) }
-    }
+    suspend fun importSeedFile(json: String, resolveSource: (name: String, hash: String) -> Pair<String, ByteArray>?): Seed? =
+        withContext(Dispatchers.IO) { SeedFileIO.import(json, resolveSource)?.also { dao.upsert(it) } }
 
     /** Pushes a Seed's masterSeed + params into the live engine; returns the unpacked params. */
     fun apply(seed: Seed): GrainState {
         val grain = ParamState.unpack(seed.params)
         GrooveriderEngine.setMasterSeed(seed.masterSeed)
-        GrooveriderEngine.setGrainDensity(grain.density)
-        GrooveriderEngine.setGrainTimingJitter(grain.timingJitter)
-        GrooveriderEngine.setGrainSizeMs(grain.grainSizeMs)
-        GrooveriderEngine.setGrainSizeJitter(grain.sizeJitter)
-        GrooveriderEngine.setGrainPosition(grain.position)
-        GrooveriderEngine.setGrainSprayMs(grain.sprayMs)
-        GrooveriderEngine.setGrainDrift(grain.drift)
-        GrooveriderEngine.setGrainPitchSt(grain.pitchSt)
-        GrooveriderEngine.setGrainPitchSpraySt(grain.pitchSpraySt)
-        GrooveriderEngine.setGrainReverseProb(grain.reverseProb)
-        GrooveriderEngine.setGrainSpread(grain.spread)
-        GrooveriderEngine.setGrainWindowType(grain.windowType)
-        GrooveriderEngine.setOutputWidth(grain.outputWidth)
-        GrooveriderEngine.setOutputGain(grain.outputGain)
-        GrooveriderEngine.setChaosRate(grain.chaosRate)
-        GrooveriderEngine.setChaosEnabled(grain.chaosEnabled)
+        grain.pushToEngine()
         return grain
     }
+}
+
+/** Sends every param of this patch to the live engine. */
+fun GrainState.pushToEngine() {
+    GrooveriderEngine.setGrainDensity(density)
+    GrooveriderEngine.setGrainTimingJitter(timingJitter)
+    GrooveriderEngine.setGrainSizeMs(grainSizeMs)
+    GrooveriderEngine.setGrainSizeJitter(sizeJitter)
+    GrooveriderEngine.setGrainPosition(position)
+    GrooveriderEngine.setGrainSprayMs(sprayMs)
+    GrooveriderEngine.setGrainDrift(drift)
+    GrooveriderEngine.setGrainPitchSt(pitchSt)
+    GrooveriderEngine.setGrainPitchSpraySt(pitchSpraySt)
+    GrooveriderEngine.setGrainReverseProb(reverseProb)
+    GrooveriderEngine.setGrainSpread(spread)
+    GrooveriderEngine.setGrainWindowType(windowType)
+    GrooveriderEngine.setOutputWidth(outputWidth)
+    GrooveriderEngine.setOutputGain(outputGain)
+    GrooveriderEngine.setChaosRate(chaosRate)
+    GrooveriderEngine.setChaosEnabled(chaosEnabled)
+    GrooveriderEngine.setChaos(chaos)
+    GrooveriderEngine.setPitchAmount(pitchAmount)
+    GrooveriderEngine.setKey(key)
+    GrooveriderEngine.setScale(scale)
+    GrooveriderEngine.setRegister(register)
+    GrooveriderEngine.setDetune(detune)
+    GrooveriderEngine.setDrone(drone)
+    GrooveriderEngine.setSpace(space)
+    GrooveriderEngine.setShimmer(shimmer)
+    GrooveriderEngine.setTone(tone)
+    GrooveriderEngine.setScan(scan)
+    GrooveriderEngine.setObservatory(observatory)
 }

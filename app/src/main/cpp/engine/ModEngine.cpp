@@ -1,6 +1,9 @@
 #include "ModEngine.h"
 
 #include <algorithm>
+#include <cmath>
+
+#include "../rand/SeedRng.h"
 
 namespace grvr {
 
@@ -8,6 +11,12 @@ namespace {
 // Bipolar mod value -> additive offset scaled to the destination's musical
 // range, so a depth of 1.0 reads as "the full useful range of the knob"
 // rather than a meaningless raw +-1 addition on e.g. density.
+constexpr float kLorenzDtMin = 0.00002f;
+constexpr float kLorenzDtMax = 0.005f;
+
+// Spec 4.3's normalisation: x/20, y/25, (z-25)/25, each soft-clipped to [-1, 1].
+float softUnit(float v) noexcept { return std::clamp(std::tanh(v), -1.0f, 1.0f); }
+
 float destRange(uint8_t dest) noexcept {
     switch (dest) {
         case kDestPosition:     return 0.5f;
@@ -55,7 +64,15 @@ void ModEngine::setMasterSeed(uint64_t seed) noexcept {
     driftA_.seed(seed, kStreamDriftA);
     driftB_.seed(seed, kStreamDriftB);
     driftC_.seed(seed, kStreamDriftC);
-    lorenz_.seed(seed);
+    lorenzX0_ = 0.1f + SeedRng::value(seed, kStreamChaosInit, 0);
+    lorenzY0_ = 0.1f + SeedRng::value(seed, kStreamChaosInit, 1);
+    lorenzZ0_ = 0.1f + SeedRng::value(seed, kStreamChaosInit, 2);
+    lorenz_.set(lorenzX0_, lorenzY0_, lorenzZ0_);
+}
+
+float ModEngine::lorenzDt(float chaosRate01) noexcept {
+    const float c = std::clamp(chaosRate01, 0.0f, 1.0f);
+    return kLorenzDtMin * std::pow(kLorenzDtMax / kLorenzDtMin, c);
 }
 
 void ModEngine::loadFirstLight() noexcept {
@@ -71,9 +88,9 @@ void ModEngine::loadFirstLight() noexcept {
 
 float ModEngine::sourceValue(uint8_t source) const noexcept {
     switch (source) {
-        case kModLorenzX: return lorenz_.outX();
-        case kModLorenzY: return lorenz_.outY();
-        case kModLorenzZ: return lorenz_.outZ();
+        case kModLorenzX: return softUnit(lorenz_.x / 20.0f);
+        case kModLorenzY: return softUnit(lorenz_.y / 25.0f);
+        case kModLorenzZ: return softUnit((lorenz_.z - 25.0f) / 25.0f);
         case kModDriftA:  return driftA_.value();
         case kModDriftB:  return driftB_.value();
         case kModDriftC:  return driftC_.value();
@@ -87,7 +104,7 @@ float ModEngine::sourceValue(uint8_t source) const noexcept {
     }
 }
 
-void ModEngine::applyDestination(uint8_t dest, float value, GrainScheduler& grains) noexcept {
+void ModEngine::applyDestination(uint8_t dest, float value, GrainEngine& grains) noexcept {
     switch (dest) {
         case kDestPosition:     grains.setPosition(std::clamp(value, 0.0f, 1.0f)); break;
         case kDestPitchSpray:   grains.setPitchSpraySemitones(std::clamp(value, 0.0f, 24.0f)); break;
@@ -100,23 +117,24 @@ void ModEngine::applyDestination(uint8_t dest, float value, GrainScheduler& grai
         case kDestReverseProb:  grains.setReverseProb(std::clamp(value, 0.0f, 1.0f)); break;
         case kDestDrift:        grains.setDrift(std::clamp(value, -2.0f, 2.0f)); break;
         case kDestSprayMs:      grains.setSprayMs(std::clamp(value, 0.0f, 5000.0f)); break;
-        case kDestOutputWidth:  combinedOutputWidth_ = std::clamp(value, 0.0f, 2.0f); break;
-        case kDestChaosRate:    break;   // consumed directly in tick(), not a scheduler param
+        case kDestOutputWidth:  grains.setOutputWidth(std::clamp(value, 0.0f, 2.0f)); break;
+        case kDestChaosRate:    break;   // consumed directly in tick(), not a grain param
         default: break;
     }
 }
 
-void ModEngine::tick(GrainScheduler& grains) noexcept {
+void ModEngine::tick(GrainEngine& grains) noexcept {
     float sums[kDestCount] = {};
     for (const auto& r : routes_) {
-        if (!r.active || r.depth == 0.0f) continue;
+        if (routesMuted_ || !r.active || r.depth == 0.0f) continue;
         const float shaped = applyModCurve(sourceValue(r.source), r.curve);
         sums[r.dest] += shaped * r.depth * destRange(r.dest);
     }
 
     // Chaos can modulate its own speed (spec 4.4) -- resolve before stepping.
     const float chaosRate = std::clamp(base_[kDestChaosRate] + sums[kDestChaosRate], 0.0f, 1.0f);
-    lorenz_.step(chaosRate);
+    lorenz_.step(lorenzDt(chaosRate));
+    if (lorenz_.escaped(100.0f, 100.0f, 100.0f)) lorenz_.set(lorenzX0_, lorenzY0_, lorenzZ0_);
     driftA_.step(0.05f, kControlRateHz);
     driftB_.step(0.07f, kControlRateHz);
     driftC_.step(0.11f, kControlRateHz);

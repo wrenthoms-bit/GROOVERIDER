@@ -7,11 +7,21 @@ import com.delrogue.grooverider.audio.AudioEngineService
 import com.delrogue.grooverider.engine.EngineMeters
 import com.delrogue.grooverider.engine.GrainCloudSnapshot
 import com.delrogue.grooverider.engine.GrooveriderEngine
+import com.delrogue.grooverider.engine.ObservatoryMacros
+import com.delrogue.grooverider.midi.KeyboardChord
+import com.delrogue.grooverider.midi.MidiBindings
+import com.delrogue.grooverider.midi.MidiController
+import com.delrogue.grooverider.midi.MidiEvent
+import com.delrogue.grooverider.midi.MidiTarget
+import com.delrogue.grooverider.onboarding.FactoryContent
+import com.delrogue.grooverider.onboarding.FactoryInstaller
 import com.delrogue.grooverider.render.RenderRepository
 import com.delrogue.grooverider.seed.SeedNaming
 import java.io.File
 import com.delrogue.grooverider.seed.Seed
 import com.delrogue.grooverider.seed.SeedRepository
+import com.delrogue.grooverider.seed.pushToEngine
+import com.delrogue.grooverider.AppPrefs
 import com.delrogue.grooverider.source.SourceRepository
 import com.delrogue.grooverider.telemetry.XrunTelemetry
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -50,6 +61,21 @@ data class GrainState(
     val outputGain: Float = 0.9f,
     val chaosRate: Float = 0.3f,
     val chaosEnabled: Boolean = true,
+
+    // Observatory (core/Observatory.h). Off by default: that is the plain grain
+    // engine every Seed saved before the Observatory existed was made on.
+    val observatory: Boolean = false,
+    val chaos: Float = 0.1f,
+    val pitchAmount: Float = 0.15f,
+    val key: Int = 0,             // 0 .. 11, C .. B
+    val scale: Int = 0,           // 0 free, chromatic, major, minor, pent-major, pent-minor, octaves+fifths
+    val register: Float = 0f,     // semitones
+    val detune: Float = 0.05f,    // semitones
+    val drone: Boolean = false,
+    val space: Float = 0.5f,
+    val shimmer: Float = 0.3f,
+    val tone: Float = 0.7f,
+    val scan: Float = 0f,
 )
 
 /** A frozen 60 s ring-buffer snapshot, awaiting keep/discard (spec 6.1). */
@@ -67,6 +93,10 @@ data class MacroState(
     val pitch: Float = 0.15f / 24f,
     val space: Float = 0.8f,
 )
+
+val KEY_NAMES = listOf("C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B")
+val SCALE_NAMES = listOf("Free", "Chromatic", "Major", "Minor", "Pentatonic", "Minor pent", "Octaves + 5ths")
+private const val SUSTAIN_PEDAL = 64
 
 class EngineViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -110,9 +140,12 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { _lineage.collect { flow.value = it.isNotEmpty() } }
     }
 
-    val seedName: StateFlow<String> = MutableStateFlow(SeedNaming.nameFor(1L)).also { flow ->
-        viewModelScope.launch { _masterSeed.collect { flow.value = SeedNaming.nameFor(it) } }
-    }
+    // The name of the Seed that was loaded, for as long as its master seed is
+    // still the one playing; after a re-roll the generated name takes over.
+    private val _loadedName = MutableStateFlow<String?>(null)
+    val seedName: StateFlow<String> = combine(_masterSeed, _loadedName) { seed, loaded ->
+        loaded ?: SeedNaming.nameFor(seed)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SeedNaming.nameFor(1L))
 
     private val _captureHint = MutableStateFlow<String?>(null)
     val captureHint: StateFlow<String?> = _captureHint.asStateFlow()
@@ -123,9 +156,59 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     private val _rendering = MutableStateFlow(false)
     val rendering: StateFlow<Boolean> = _rendering.asStateFlow()
 
+    // ---- the loaded Seed, as it was loaded: what "back to the preset" means ----
+    private val _loadedSeedId = MutableStateFlow<String?>(null)
+    private var loadedGrain: GrainState? = null
+    private var loadedMacro: MacroState? = null
+    /** The preset's own description, shown under its name. (Key and scale have their own chips.) */
+    val subtitle: StateFlow<String> = combine(_loadedSeedId, _masterSeed) { id, _ ->
+        id?.let { FactoryContent.subtitleFor(it) } ?: ""
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    // Grain settings as they were before DRONE reshaped them, so switching it off puts them back.
+    private var beforeDrone: GrainState? = null
+
+    // ---- MIDI keyboard and knobs ----
+    private val keyboard = KeyboardChord()
+    private var bindings = MidiBindings.decode(AppPrefs.midiBindings(app))
+    private val midi = MidiController(app, ::onMidi)
+    val midiDevices: StateFlow<List<String>> = midi.deviceNames
+    private val _chord = MutableStateFlow<List<Int>>(emptyList())
+    /** Held notes as MIDI note numbers, lowest first. */
+    val chord: StateFlow<List<Int>> = _chord.asStateFlow()
+    private val _keysMode = MutableStateFlow(KeyboardChord.Mode.LATCH)
+    val keysMode: StateFlow<KeyboardChord.Mode> = _keysMode.asStateFlow()
+    private val _midiArmed = MutableStateFlow<MidiTarget?>(null)
+    /** The control waiting for a knob or pad, if any. */
+    val midiArmed: StateFlow<MidiTarget?> = _midiArmed.asStateFlow()
+    private val _midiBound = MutableStateFlow(describeBindings())
+    /** What drives each bound control, e.g. SPACE to "CC 74". */
+    val midiBound: StateFlow<Map<MidiTarget, String>> = _midiBound.asStateFlow()
+    private val _midiNote = MutableStateFlow<String?>(null)
+    /** A passing word about what MIDI-learn just did. */
+    val midiNote: StateFlow<String?> = _midiNote.asStateFlow()
+
     private val xrunTelemetry = XrunTelemetry(app)
     private var pollJob: Job? = null
     private var cloudPollJob: Job? = null
+
+    /** Called once the main screen is up. Puts the bundled Big River and presets
+     * in the library if this install does not have them yet, and after
+     * onboarding opens on Standing Room Only. */
+    fun onAppReady() {
+        midi.start()
+        viewModelScope.launch {
+            try {
+                FactoryInstaller.ensure(getApplication())
+            } catch (e: Exception) {
+                _seedLoadError.value = "Couldn't install the factory presets: ${e.message}"
+                return@launch
+            }
+            if (AppPrefs.takeOpenOnDefaultPreset(getApplication())) {
+                seedRepo.getById(FactoryContent.STANDING_ROOM_ONLY_ID)?.let { loadSeed(it) }
+            }
+        }
+    }
 
     fun startEngine() {
         AudioEngineService.start(getApplication<Application>())
@@ -228,6 +311,155 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setChaosRate(v: Float) { _grain.value = _grain.value.copy(chaosRate = v); GrooveriderEngine.setChaosRate(v) }
     fun setChaosEnabled(on: Boolean) { _grain.value = _grain.value.copy(chaosEnabled = on); GrooveriderEngine.setChaosEnabled(on) }
 
+    // ---- Observatory ---------------------------------------------------------
+
+    fun setObservatory(on: Boolean) { _grain.value = _grain.value.copy(observatory = on); GrooveriderEngine.setObservatory(on) }
+    fun setChaos(v: Float) { _grain.value = _grain.value.copy(chaos = v); GrooveriderEngine.setChaos(v) }
+    fun setPitchAmount(v: Float) { _grain.value = _grain.value.copy(pitchAmount = v); GrooveriderEngine.setPitchAmount(v) }
+    fun setKey(v: Int) { _grain.value = _grain.value.copy(key = v); GrooveriderEngine.setKey(v) }
+    fun setScale(v: Int) { _grain.value = _grain.value.copy(scale = v); GrooveriderEngine.setScale(v) }
+    fun setRegister(v: Float) { _grain.value = _grain.value.copy(register = v); GrooveriderEngine.setRegister(v) }
+    fun setDetune(v: Float) { _grain.value = _grain.value.copy(detune = v); GrooveriderEngine.setDetune(v) }
+    fun setDrone(on: Boolean) { _grain.value = _grain.value.copy(drone = on); GrooveriderEngine.setDrone(on) }
+    fun setSpace(v: Float) { _grain.value = _grain.value.copy(space = v); GrooveriderEngine.setSpace(v) }
+    fun setShimmer(v: Float) { _grain.value = _grain.value.copy(shimmer = v); GrooveriderEngine.setShimmer(v) }
+    fun setTone(v: Float) { _grain.value = _grain.value.copy(tone = v); GrooveriderEngine.setTone(v) }
+    fun setScan(v: Float) { _grain.value = _grain.value.copy(scan = v); GrooveriderEngine.setScan(v) }
+
+    /**
+     * DRONE holds one spot in the sound and lets it evolve. As in the web app,
+     * it also pushes the grains long and the overlap high, stops the scan and
+     * loosens the timing so the cloud never pulses; switching it off puts those
+     * back as they were.
+     */
+    fun setDroneOn(on: Boolean) {
+        val g = _grain.value
+        if (on == g.drone) return
+        if (on) {
+            beforeDrone = g
+            val e = ObservatoryMacros.effective(g.grainSizeMs, g.density, g.timingJitter, g.scan, drone = true)
+            setGrainSizeMs(e.grainMs); setGrainDensity(e.density)
+            setGrainTimingJitter(e.timingJitter); setGrainSizeJitter(e.sizeJitter); setScan(e.scan)
+        } else {
+            beforeDrone?.let { b ->
+                setGrainSizeMs(b.grainSizeMs); setGrainDensity(b.density)
+                setGrainTimingJitter(b.timingJitter); setGrainSizeJitter(b.sizeJitter); setScan(b.scan)
+            }
+            beforeDrone = null
+        }
+        setDrone(on)
+    }
+
+    // ---- presets --------------------------------------------------------------
+
+    val factoryPresets: List<FactoryContent.Preset> get() = FactoryContent.presets
+
+    fun loadPreset(id: String) {
+        viewModelScope.launch { seedRepo.getById(id)?.let { loadSeed(it) } }
+    }
+
+    /** Double-tap on a ring: back to where the loaded patch has it. */
+    fun resetMacro(target: MidiTarget) {
+        val m = loadedMacro ?: return
+        when (target) {
+            MidiTarget.TEXTURE -> {
+                // the patch's own grain settings, not the curve's: a preset may sit off it
+                _macro.value = _macro.value.copy(texture = m.texture)
+                loadedGrain?.let { g ->
+                    setGrainSizeMs(g.grainSizeMs); setGrainDensity(g.density)
+                    setGrainTimingJitter(g.timingJitter); setGrainSizeJitter(g.sizeJitter)
+                }
+            }
+            MidiTarget.DRIFT -> setMacroDrift(m.drift)
+            MidiTarget.PITCH -> setMacroPitch(m.pitch)
+            MidiTarget.SPACE -> setMacroSpace(m.space)
+            else -> Unit
+        }
+    }
+
+    // ---- keyboard --------------------------------------------------------------
+
+    fun setKeysMode(mode: KeyboardChord.Mode) {
+        _keysMode.value = mode
+        if (keyboard.setMode(mode)) pushChord()
+    }
+
+    fun clearChord() { if (keyboard.clear()) pushChord() }
+
+    private fun pushChord() {
+        _chord.value = keyboard.chord
+        GrooveriderEngine.setNotes(keyboard.semitones)
+        GrooveriderEngine.setPlaying(keyboard.gateOpen)
+    }
+
+    // ---- MIDI ------------------------------------------------------------------
+
+    /** Long-press on a control: it waits for a knob (or, for a button, a pad). Again to cancel. */
+    fun armMidi(target: MidiTarget) {
+        bindings.arm(target)
+        _midiArmed.value = bindings.armed
+        _midiNote.value = when {
+            bindings.armed == null -> null
+            midi.deviceNames.value.isEmpty() -> "No MIDI controller connected. Plug one in, then ${if (target.pad) "hit a pad" else "turn a knob"}."
+            target.pad -> "Hit a pad to bind it to ${target.label}."
+            else -> "Turn a knob to bind it to ${target.label}."
+        }
+    }
+
+    fun forgetMidiBindings() {
+        bindings.clear()
+        AppPrefs.setMidiBindings(getApplication(), "")
+        _midiArmed.value = null; _midiBound.value = emptyMap(); _midiNote.value = "MIDI mappings forgotten."
+    }
+
+    fun dismissMidiNote() { _midiNote.value = null }
+
+    private fun describeBindings(): Map<MidiTarget, String> =
+        MidiTarget.entries.mapNotNull { t -> bindings.describe(t)?.let { t to it } }.toMap()
+
+    private fun onBound(target: MidiTarget) {
+        AppPrefs.setMidiBindings(getApplication(), bindings.encode())
+        _midiArmed.value = null
+        _midiBound.value = describeBindings()
+        _midiNote.value = "${target.label} is now on ${bindings.describe(target)}."
+    }
+
+    /** Main thread, from [MidiController]. */
+    private fun onMidi(event: MidiEvent) {
+        when (event) {
+            is MidiEvent.ControlChange -> when (val outcome = bindings.onControlChange(event.controller, event.value)) {
+                is MidiBindings.Outcome.Bound -> onBound(outcome.target)
+                is MidiBindings.Outcome.Turn -> turn(outcome.target, outcome.value)
+                else -> if (event.controller == SUSTAIN_PEDAL && keyboard.setSustain(event.value >= 64)) pushChord()
+            }
+            is MidiEvent.NoteOn -> when (val outcome = bindings.onNoteOn(event.note)) {
+                is MidiBindings.Outcome.Bound -> onBound(outcome.target)
+                is MidiBindings.Outcome.Hit -> when (outcome.target) {
+                    MidiTarget.DRONE -> setDroneOn(!_grain.value.drone)
+                    MidiTarget.REROLL -> reRoll()
+                    else -> Unit
+                }
+                else -> if (keyboard.noteOn(event.note)) pushChord()      // any other note plays the cloud
+            }
+            is MidiEvent.NoteOff -> if (!bindings.isPad(event.note) && keyboard.noteOff(event.note)) pushChord()
+        }
+    }
+
+    /** A knob at [v] (0 .. 1) moves its control across the control's whole range. */
+    private fun turn(target: MidiTarget, v: Float) {
+        when (target) {
+            MidiTarget.TEXTURE -> setMacroTexture(v)
+            MidiTarget.DRIFT -> setMacroDrift(v)
+            MidiTarget.SPACE -> setMacroSpace(v)
+            MidiTarget.PITCH -> setMacroPitch(v)
+            MidiTarget.SHIMMER -> setShimmer(v)
+            MidiTarget.TONE -> setTone(v)
+            MidiTarget.REGISTER -> setRegister(Math.round(v * 48f - 24f).toFloat())
+            MidiTarget.SCAN -> setScan(v * 2f - 1f)
+            MidiTarget.DRONE, MidiTarget.REROLL -> Unit
+        }
+    }
+
     /** Resets the grain/output controls to the neutral recall-default preset. */
     fun recallGrainDefaults() {
         _grain.value = _grain.value.copy(
@@ -248,25 +480,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         applyGrainToEngine()
     }
 
-    private fun applyGrainToEngine() {
-        val g = _grain.value
-        GrooveriderEngine.setGrainDensity(g.density)
-        GrooveriderEngine.setGrainTimingJitter(g.timingJitter)
-        GrooveriderEngine.setGrainSizeMs(g.grainSizeMs)
-        GrooveriderEngine.setGrainSizeJitter(g.sizeJitter)
-        GrooveriderEngine.setGrainPosition(g.position)
-        GrooveriderEngine.setGrainSprayMs(g.sprayMs)
-        GrooveriderEngine.setGrainDrift(g.drift)
-        GrooveriderEngine.setGrainPitchSt(g.pitchSt)
-        GrooveriderEngine.setGrainPitchSpraySt(g.pitchSpraySt)
-        GrooveriderEngine.setGrainReverseProb(g.reverseProb)
-        GrooveriderEngine.setGrainSpread(g.spread)
-        GrooveriderEngine.setGrainWindowType(g.windowType)
-        GrooveriderEngine.setOutputWidth(g.outputWidth)
-        GrooveriderEngine.setOutputGain(g.outputGain)
-        GrooveriderEngine.setChaosRate(g.chaosRate)
-        GrooveriderEngine.setChaosEnabled(g.chaosEnabled)
-    }
+    private fun applyGrainToEngine() = _grain.value.pushToEngine()
 
     // ---- Seed persistence (M3) ---------------------------------------------
 
@@ -275,6 +489,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
      * prohibition is on the signal path, not on how a fresh seed is chosen). */
     fun regenerateMasterSeed() {
         val s = Random.nextLong()
+        _loadedName.value = null
         _masterSeed.value = s
         GrooveriderEngine.setMasterSeed(s)
     }
@@ -292,8 +507,14 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
         val stack = _lineage.value
         val previous = stack.lastOrNull() ?: return
         _lineage.value = stack.dropLast(1)
+        _loadedName.value = null
         _masterSeed.value = previous
         GrooveriderEngine.setMasterSeed(previous)
+    }
+
+    /** Long-press on the field: hold this spot. With the Observatory that is DRONE; without, the freeze below. */
+    fun onLongPress() {
+        if (_grain.value.observatory) setDroneOn(!_grain.value.drone) else setFrozen(!_frozen.value)
     }
 
     /** Long-press: playhead latches, drift -> 0 (spec 5.3). Press again to release. */
@@ -316,7 +537,10 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
      * matches the grain particles' own plot (Y = pitch, up = transposed up). */
     fun onCanvasDrag(x01: Float, y01: Float) {
         setGrainPosition(x01.coerceIn(0f, 1f))
-        setGrainPitchSt((y01.coerceIn(0f, 1f) - 0.5f) * 48f)
+        val semitones = (y01.coerceIn(0f, 1f) - 0.5f) * 48f
+        // With the Observatory on, pitch is its job (key, scale, keyboard): up
+        // and down is brighter and darker, as on the web's performance field.
+        if (_grain.value.observatory) setTone(y01.coerceIn(0f, 1f)) else setGrainPitchSt(semitones)
     }
 
     fun onCanvasPinch(spread01Delta: Float) {
@@ -324,6 +548,10 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onCanvasRotate(driftDelta: Float) {
+        if (_grain.value.observatory) {      // the Observatory's drift is its scan; a latched drone does not scan
+            if (!_grain.value.drone) setScan((_grain.value.scan + driftDelta * 0.25f).coerceIn(-1f, 1f))
+            return
+        }
         if (_frozen.value) return   // frozen means drift stays at 0
         setGrainDrift((_grain.value.drift + driftDelta).coerceIn(-2f, 2f))
     }
@@ -354,8 +582,11 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun discardCapture() { _captureReview.value = null }
 
     /** Offline re-render at HQ over the trimmed range (spec 6.1, 6.3). */
-    fun keepCapture(sourceHash: String, onRendered: (File) -> Unit) {
+    fun keepCapture(selectedSourceHash: String, onRendered: (File) -> Unit) {
         val c = _captureReview.value ?: return
+        // What the engine is actually playing: a Seed loaded from the Library
+        // brings its own source without it ever being picked on the Sources tab.
+        val sourceHash = SourceRepository.engineSourceHash.value.ifEmpty { selectedSourceHash }
         if (sourceHash.isEmpty()) {
             _captureHint.value = "No source loaded -- select one in the Sources tab first."
             return
@@ -369,6 +600,8 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
                 val file = renderRepo.renderCurrent(
                     sourceHash = sourceHash, masterSeed = _masterSeed.value, grain = _grain.value,
                     durationSeconds = durationSeconds, seamlessLoop = false,
+                    name = seedName.value,
+                    notes = keyboard.semitones,
                 )
                 _captureReview.value = null
                 onRendered(file)
@@ -384,9 +617,22 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     // Curated and non-linear so every position on every macro sounds good --
     // the antidote to a macro that can produce a bad sound (spec 5.4, 10).
 
+    // With the Observatory on they are the web app's four rings instead:
+    // TEXTURE its long-to-dense curve, DRIFT its chaos, PITCH its pitch amount,
+    // SPACE its reverb.
+
     fun setMacroTexture(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(texture = v)
+        if (_grain.value.observatory) {
+            val t = ObservatoryMacros.texture(v)
+            val g = ObservatoryMacros.effective(t.grainMs, t.density, t.timingJitter, _grain.value.scan, _grain.value.drone)
+            setGrainSizeMs(g.grainMs)
+            setGrainDensity(g.density)
+            setGrainTimingJitter(g.timingJitter)
+            setGrainSizeJitter(g.sizeJitter)
+            return
+        }
         val (grainSizeMs, density, jitter) = textureCurve(v)
         setGrainSizeMs(grainSizeMs)
         setGrainDensity(density)
@@ -396,6 +642,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacroDrift(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(drift = v)
+        if (_grain.value.observatory) { setChaos(v); return }
         // Exponential: the interesting territory is all in the bottom 20%.
         setChaosRate(v * v)
     }
@@ -403,6 +650,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacroPitch(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(pitch = v)
+        if (_grain.value.observatory) { setPitchAmount(v); return }
         // Detented: 0 unison, 0.25 chorus, 0.5 octaves, 0.75 octave+fifth, 1 wide scatter.
         setGrainPitchSpraySt(v * 24f)
     }
@@ -410,6 +658,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacroSpace(v01: Float) {
         val v = v01.coerceIn(0f, 1f)
         _macro.value = _macro.value.copy(space = v)
+        if (_grain.value.observatory) { setSpace(v); return }
         setGrainSpread(v)
         setOutputWidth(v * 2f)
     }
@@ -466,7 +715,20 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
             }
             val g = seedRepo.apply(seed)
             _grain.value = g
+            _loadedName.value = seed.name
+            _loadedSeedId.value = seed.id
             _masterSeed.value = seed.masterSeed
+            beforeDrone = null
+            _frozen.value = false
+            if (g.observatory) {
+                // show the rings where the patch has them
+                val texture = FactoryContent.presets.firstOrNull { it.id == seed.id }?.texture
+                    ?: ObservatoryMacros.textureFor(g.grainSizeMs)
+                _macro.value = MacroState(texture = texture, drift = g.chaos, pitch = g.pitchAmount, space = g.space)
+            }
+            loadedGrain = g
+            loadedMacro = _macro.value
+            pushChord()      // a held chord carries over to the new patch
         }
     }
 
@@ -477,6 +739,7 @@ class EngineViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        midi.stop()
         pollJob?.cancel()
         cloudPollJob?.cancel()
         super.onCleared()

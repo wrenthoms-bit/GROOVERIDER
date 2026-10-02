@@ -198,6 +198,46 @@ try {
     await page.close();
   }
 
+  // ============ 6. seed files, shared with the phone app ============
+  section('seed files');
+  {
+    const page = await openPage(); await page.click('#enter'); await sleep(2500);
+    const near = (a, b) => Object.keys(a).every(k => typeof a[k] !== 'number' || Math.abs(a[k] - b[k]) < 1e-6);
+    // the engine's settings and seed for each preset, as the page itself gives them
+    const preset = async i => { await page.select('#preset', String(i)); await sleep(300);
+      return page.evaluate(() => ({ e: window.__grv.effective(), seed: window.__grv.seed() })); };
+    const sro = await preset(0), ember = await preset(2);
+
+    // a seed written the way the phone app writes one (the fixture both sides are tested against)
+    const fixture = JSON.parse(fs.readFileSync(new URL('../core/tests/fixtures/standing-room-only.grvr', import.meta.url), 'utf8'));
+    let got = await page.evaluate(f => { window.__grv.applySeedFile(f); return { e: window.__grv.effective(), seed: window.__grv.seed() }; }, fixture);
+    R('a phone-format seed loads as the same patch', near(sro.e, got.e) && got.seed[0] === sro.seed[0] && got.seed[1] === sro.seed[1],
+      JSON.stringify({ density: got.e.density, grainMs: got.e.grainMs, space: got.e.space, key: got.e.key, scale: got.e.scale }));
+    R('its name is shown', await text(page, '#presetTitle') === 'Standing Room Only' && /loaded seed/.test(await text(page, '#presetSub')));
+
+    // save here, change everything, load it back
+    await preset(2);
+    const saved = await page.evaluate(() => window.__grv.buildSeedFile());
+    R('a saved seed is the shared format', saved.format === 'grooverider-seed' && saved.version === 1 && /^[0-9a-f]{16}$/.test(saved.masterSeed)
+      && saved.params.window === 'tukey' && saved.observatory === true, saved.masterSeed + ' ' + saved.name);
+    await preset(1);
+    got = await page.evaluate(f => { window.__grv.applySeedFile(f); return { e: window.__grv.effective(), seed: window.__grv.seed() }; }, saved);
+    R('save, change preset, load: the same patch and seed', near(ember.e, got.e) && got.seed[0] === ember.seed[0] && got.seed[1] === ember.seed[1]);
+    await sleep(2500); const st = await stats(page);
+    R('the loaded seed plays', st.playing && st.voices > 0, JSON.stringify({ voices: st.voices }));
+
+    // a seed from the phone's plain grain engine, and something that is not a seed at all
+    const plain = { format:'grooverider-seed', version:1, name:'Slow Tar', masterSeed:'00000000000003e9', observatory:false,
+      params:{ density:24, grainMs:700, timingJitter:0.15, sizeJitter:0.25, position:0.5, sprayMs:300, reverse:0.1, spread:0.7, window:'hann', width:1, gain:0.9 },
+      plain:{ drift:0.05, pitchSt:-12, pitchSpraySt:4.5, chaosRate:0.25, chaosEnabled:true } };
+    got = await page.evaluate(f => { window.__grv.applySeedFile(f); return window.__grv.effective(); }, plain);
+    R('a plain-engine seed opens as dry, free-pitch settings', got.space === 0 && got.chaos === 0 && got.scale === 0 && got.register === -12
+      && Math.abs(got.pitch - 0.5) < 1e-6 && got.window === 1 && got.density === 24);
+    const refused = await page.evaluate(() => { try { window.__grv.applySeedFile({ hello:'world' }); return false; } catch (e) { return true; } });
+    R('a file that is not a seed is refused', refused);
+    await page.close();
+  }
+
   section('page health');
   R('no page errors or console errors', problems.length === 0, problems.join(' | '));
 } finally {

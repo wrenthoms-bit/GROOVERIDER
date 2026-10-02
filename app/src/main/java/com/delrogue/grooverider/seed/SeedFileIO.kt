@@ -5,32 +5,48 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Seed export/import as `.grvr` JSON for backup (spec M7) -- a full Seed
- * record, byte arrays base64-encoded, independent of any WAV. */
+/**
+ * Seed files (`.grvr`). They are written in the format shared with the web app
+ * ([SeedShareFormat]). Files written by earlier versions of this app -- a full
+ * database record with its byte arrays base64-encoded -- still import.
+ */
 object SeedFileIO {
 
-    fun export(seed: Seed): String = JSONObject().apply {
-        put("id", seed.id)
-        put("name", seed.name)
-        put("masterSeed", seed.masterSeed)
-        put("params", Base64.encodeToString(seed.params, Base64.NO_WRAP))
-        put("modRoutes", Base64.encodeToString(seed.modRoutes, Base64.NO_WRAP))
-        put("sourceHash", seed.sourceHash)
-        put("inPointMs", seed.inPointMs)
-        put("outPointMs", seed.outPointMs)
-        put("parentId", seed.parentId ?: JSONObject.NULL)
-        put("mutationDistance", seed.mutationDistance)
-        put("lockedParams", seed.lockedParams)
-        put("favourite", seed.favourite)
-        put("renderCount", seed.renderCount)
-        put("createdAt", seed.createdAt)
-        put("waveformThumb", Base64.encodeToString(seed.waveformThumb, Base64.NO_WRAP))
-    }.toString(2)
+    fun export(seed: Seed, sourceName: String): String = SeedShareFormat.encode(
+        SeedShareFormat.Shared(
+            name = seed.name, masterSeed = seed.masterSeed, grain = ParamState.unpack(seed.params),
+            sourceName = sourceName, sourceHash = seed.sourceHash,
+        )
+    )
 
-    fun exportToFile(seed: Seed, file: File) = file.writeText(export(seed))
+    fun exportToFile(seed: Seed, sourceName: String, file: File) = file.writeText(export(seed, sourceName))
 
-    /** Always a fresh id and no parent -- an imported Seed starts a new lineage. */
-    fun import(json: String): Seed? = runCatching {
+    /**
+     * Always a fresh id and no parent -- an imported Seed starts a new lineage.
+     * A shared-format file names its sound rather than carrying it, so
+     * [resolveSource] is asked which source here to put it on (null = none
+     * suitable, and the import fails); it returns that source's hash and the
+     * thumbnail to show.
+     */
+    fun import(json: String, resolveSource: (name: String, hash: String) -> Pair<String, ByteArray>?): Seed? {
+        val shared = SeedShareFormat.decode(json) ?: return importLegacy(json)
+        val (sourceHash, thumb) = resolveSource(shared.sourceName, shared.sourceHash) ?: return null
+        return Seed(
+            id = UUID.randomUUID().toString(),
+            name = shared.name,
+            masterSeed = shared.masterSeed,
+            params = ParamState.pack(shared.grain),
+            modRoutes = ByteArray(0),
+            sourceHash = sourceHash,
+            inPointMs = 0, outPointMs = 0,
+            parentId = null, mutationDistance = 0f, lockedParams = 0L,
+            favourite = false, renderCount = 0,
+            createdAt = System.currentTimeMillis(),
+            waveformThumb = thumb,
+        )
+    }
+
+    private fun importLegacy(json: String): Seed? = runCatching {
         val o = JSONObject(json)
         Seed(
             id = UUID.randomUUID().toString(),
@@ -51,5 +67,4 @@ object SeedFileIO {
         )
     }.getOrNull()
 
-    fun importFromFile(file: File): Seed? = runCatching { file.readText() }.getOrNull()?.let { import(it) }
 }

@@ -22,6 +22,13 @@ struct RenderRequest {
     bool  chaosEnabled = true;
     float chaosRate = 0.3f;
 
+    // Observatory (core/Observatory.h). Off = the Seed predates it.
+    bool  observatory = false;
+    float chaos = 0.1f, pitchAmount = 0.15f, key = 0.0f, scale = 0.0f, registerSt = 0.0f, detune = 0.05f;
+    float drone = 0.0f, space = 0.5f, shimmer = 0.3f, tone = 0.7f, scan = 0.0f;
+    float notes[16] = {};      // held keyboard notes, semitones from middle C
+    int32_t noteCount = 0;
+
     double durationSeconds = 60.0;
 
     // Seamless loop rendering (spec 6.4): render `durationSeconds` plus a
@@ -31,13 +38,18 @@ struct RenderRequest {
 };
 
 /// A second engine instance, same C++ code, on a virtual clock -- no Oboe
-/// stream, no realtime deadline (spec 6.3). Runs at 2x oversample with a
-/// proper decimation filter on the way back down, and ticks the mod matrix
-/// at 4 kHz instead of realtime's 1 kHz.
+/// stream, no realtime deadline (spec 6.3).
+///
+/// Without the Observatory it runs at 2x oversample with a proper decimation
+/// filter on the way back down, and ticks the mod matrix at 4 kHz instead of
+/// realtime's 1 kHz. With the Observatory it runs exactly as the live engine
+/// does, at the output rate, so the file is what was heard -- and, like the
+/// web app's export, it keeps going after `durationSeconds` until the reverb
+/// tail has died away (up to 20 s).
 class OfflineRenderer {
 public:
-    /// `source` at any rate; internally resampled to 2x `dstRate`. Returns
-    /// interleaved float32 stereo at `dstRate`.
+    /// `source` at any rate; resampled internally. Returns interleaved float32
+    /// stereo at `dstRate`.
     static std::vector<float> render(const SourceBuffer& source, const RenderRequest& req, int32_t dstRate);
 };
 

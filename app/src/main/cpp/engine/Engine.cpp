@@ -8,6 +8,11 @@
 #include <thread>
 
 #include "../dsp/Denormal.h"
+#include "../dsp/Spectrum.h"
+
+#ifdef __ANDROID__
+#include <sched.h>
+#endif
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  "grvr", __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  "grvr", __VA_ARGS__)
@@ -20,6 +25,49 @@ constexpr float kTwoPi = 6.283185307179586f;
 const char* sharingName(oboe::SharingMode m) {
     return m == oboe::SharingMode::Exclusive ? "Exclusive" : "Shared";
 }
+/// The device's fastest cores as a bit mask (bit n = cpu n), or 0 if they are
+/// all alike or it cannot be read. Reads sysfs, so never call it from the
+/// audio thread.
+uint64_t fastCoreMask() {
+    uint64_t mask = 0;
+    long best = 0, slowest = 0;
+    for (int cpu = 0; cpu < 64; ++cpu) {
+        char path[80];
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+        FILE* f = fopen(path, "r");
+        if (!f) break;
+        long khz = 0;
+        if (fscanf(f, "%ld", &khz) != 1) khz = 0;
+        fclose(f);
+        if (khz > best) { best = khz; mask = 0; }
+        if (khz == best) mask |= (1ULL << cpu);
+        if (slowest == 0 || khz < slowest) slowest = khz;
+    }
+    return best > slowest ? mask : 0;
+}
+
+/// Keeps the calling thread on the given cores. On phones with big and little
+/// cores the scheduler is happy to leave the audio callback on a little one,
+/// where the same cloud costs several times as much of its deadline.
+///
+/// Called again every so often, not just once: Android re-homes an app's
+/// threads when the screen goes off or the app leaves the foreground, which
+/// silently undoes the pin. While the system will not allow the fast cores
+/// the call simply fails, and it takes again once they are allowed.
+void pinCallingThread(uint64_t mask) noexcept {
+#ifdef __ANDROID__
+    if (mask == 0) return;
+    const int cpu = sched_getcpu();
+    if (cpu >= 0 && cpu < 64 && (mask & (1ULL << cpu))) return;   // already on a fast core
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    for (int cpu = 0; cpu < 64; ++cpu) if (mask & (1ULL << cpu)) CPU_SET(cpu, &set);
+    sched_setaffinity(0, sizeof set, &set);   // 0 = this thread; best effort
+#else
+    (void)mask;
+#endif
+}
+
 const char* perfName(oboe::PerformanceMode m) {
     switch (m) {
         case oboe::PerformanceMode::LowLatency: return "LowLatency";
@@ -87,6 +135,7 @@ bool Engine::openStream() {
     stream_->setBufferSizeInFrames(burstFrames_ * kBurstsAtStart);
 
     configureSmoothers(sampleRate_);
+    fastCores_    = fastCoreMask();
     phase_        = 0.0;
     lastXRun_     = 0;
     bufferGrows_  = 0;
@@ -100,10 +149,10 @@ bool Engine::openStream() {
         return false;
     }
 
-    LOGI("stream open: %d Hz, burst %d, buffer %d, %s/%s, api=%s",
+    LOGI("stream open: %d Hz, burst %d, buffer %d, %s/%s, api=%s, fast cores 0x%llx",
          stream_->getSampleRate(), burstFrames_, stream_->getBufferSizeInFrames(),
          sharingName(stream_->getSharingMode()), perfName(stream_->getPerformanceMode()),
-         oboe::convertToText(stream_->getAudioApi()));
+         oboe::convertToText(stream_->getAudioApi()), static_cast<unsigned long long>(fastCores_));
     return true;
 }
 
@@ -130,11 +179,6 @@ void Engine::configureSmoothers(float sr) noexcept {
 
     grainEngine_.configure(sr);
     modEngine_.configure(static_cast<uint64_t>(pendingMasterSeed_.load(std::memory_order_relaxed)));
-    outputStage_.configure(sr);
-    outputWidth_.configure(0.020f, sr);
-    outputGain_.configure(0.020f, sr);
-    outputWidth_.snap(modEngine_.combinedOutputWidth());
-    outputGain_.snap(0.9f);
 
     controlPeriodSamples_ = std::max(1, static_cast<int32_t>(sr / 1000.0f));
     controlCountdown_ = controlPeriodSamples_;
@@ -168,7 +212,7 @@ void Engine::applyPendingParams() noexcept {
 
             // Grain params set the *base* value; ModEngine::tick() layers
             // modulation on top each control tick and pushes the combined
-            // value into the scheduler (spec 4.4). A route at depth 0 leaves
+            // value into the grain engine (spec 4.4). A route at depth 0 leaves
             // the base untouched, so this is bit-identical to the M2/M3 path.
             case kGrainDensity:      modEngine_.setBase(kDestDensity, msg.value); break;
             case kGrainTimingJitter: modEngine_.setBase(kDestTimingJitter, msg.value); break;
@@ -184,8 +228,42 @@ void Engine::applyPendingParams() noexcept {
             case kGrainWindowType:   grainEngine_.setWindowType(static_cast<uint16_t>(msg.value + 0.5f)); break;
 
             case kOutputWidth: modEngine_.setBase(kDestOutputWidth, msg.value); break;
-            case kOutputGain:  outputGain_.setTarget(msg.value); break;
+            case kOutputGain:  grainEngine_.setOutputGain(msg.value); break;
             case kChaosRate:   modEngine_.setBase(kDestChaosRate, msg.value); break;
+
+            // Observatory. Position, spray, spread and width reach it through
+            // the grain params above; these are the ones only it has.
+            case kChaos:       grainEngine_.setObsParam(grv::O_CHAOS, msg.value); break;
+            case kPitchAmount: grainEngine_.setObsParam(grv::O_PITCH, msg.value); break;
+            case kKey:         grainEngine_.setObsParam(grv::O_KEY, msg.value); break;
+            case kScale:       grainEngine_.setObsParam(grv::O_SCALE, msg.value); break;
+            case kRegister:    grainEngine_.setObsParam(grv::O_REGISTER, msg.value); break;
+            case kDetune:      grainEngine_.setObsParam(grv::O_DETUNE, msg.value); break;
+            case kDrone:       grainEngine_.setObsParam(grv::O_DRONE, msg.value); break;
+            case kSpace:       grainEngine_.setObsParam(grv::O_SPACE, msg.value); break;
+            case kShimmer:     grainEngine_.setObsParam(grv::O_SHIMMER, msg.value); break;
+            case kTone:        grainEngine_.setObsParam(grv::O_TONE, msg.value); break;
+            case kScan:        grainEngine_.setObsParam(grv::O_SCAN, msg.value); break;
+            case kObservatory: {
+                const bool on = msg.value > 0.5f;
+                grainEngine_.setObservatory(on);
+                modEngine_.setRoutesMuted(on);
+                break;
+            }
+
+            case kNotesBegin:
+                pendingNoteCount_ = std::clamp(static_cast<int32_t>(msg.value + 0.5f), 0,
+                                               static_cast<int32_t>(grv::OBS_MAX_NOTES));
+                pendingNotesGot_ = 0;
+                if (pendingNoteCount_ == 0) grainEngine_.setNotes(pendingNotes_, 0);
+                break;
+            case kNoteValue:
+                if (pendingNotesGot_ < pendingNoteCount_) {
+                    pendingNotes_[pendingNotesGot_++] = msg.value;
+                    if (pendingNotesGot_ == pendingNoteCount_) grainEngine_.setNotes(pendingNotes_, pendingNoteCount_);
+                }
+                break;
+            case kPlaying: grainEngine_.setPlaying(msg.value > 0.5f); break;
             default: break;
         }
     }
@@ -196,7 +274,7 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
                                               int32_t numFrames) {
     const auto t0 = std::chrono::steady_clock::now();
 
-    if (!ftzDone_) { enableFlushToZero(); ftzDone_ = true; }
+    if (!ftzDone_) { enableFlushToZero(); pinCallingThread(fastCores_); ftzDone_ = true; }
 
     applyPendingParams();
     fade_.setTarget(stopFade_.load(std::memory_order_acquire));
@@ -226,13 +304,12 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
     // --- source preview mixed on top (M1) ---
     renderPreview(out, numFrames, peakL, peakR);
 
-    // --- grain cloud (M2). Rendered into its own scratch buffer so its
-    // output stage (DC blocker / width / saturation) never touches the
+    // --- grain cloud (M2). Rendered into its own scratch buffer so the
+    // core's output stage (DC blocker / width / saturation) never touches the
     // diagnostic tone or preview paths, whose exact linearity the M0 tests
     // depend on.
     {
         const int32_t n = numFrames <= kMaxBlockFrames ? numFrames : kMaxBlockFrames;
-        std::fill(grainMix_, grainMix_ + static_cast<size_t>(n) * 2, 0.0f);
 
         // Mod engine ticks at a fixed 1 kHz control rate (spec 4.3) regardless
         // of the audio callback's burst size, so render in control-period
@@ -241,7 +318,6 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
         while (offset < n) {
             if (controlCountdown_ <= 0) {
                 modEngine_.tick(grainEngine_);
-                outputWidth_.setTarget(modEngine_.combinedOutputWidth());
                 controlCountdown_ = controlPeriodSamples_;
             }
             const int32_t chunk = std::min(controlCountdown_, n - offset);
@@ -251,11 +327,8 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            const float width = outputWidth_.next();
-            const float gain  = outputGain_.next();
-            float gl = grainMix_[i * 2];
-            float gr = grainMix_[i * 2 + 1];
-            outputStage_.process(gl, gr, width, gain);
+            const float gl = grainMix_[i * 2];
+            const float gr = grainMix_[i * 2 + 1];
             out[i * 2]     += gl;
             out[i * 2 + 1] += gr;
             const float al = gl < 0.0f ? -gl : gl;
@@ -279,6 +352,7 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
     // --- adaptive buffer sizing, checked occasionally rather than every block
     if (--tuneCountdown_ <= 0) {
         tuneCountdown_ = kTuneInterval;
+        pinCallingThread(fastCores_);
         auto xr = stream->getXRunCount();
         if (xr) {
             const int32_t count = xr.value();
@@ -312,6 +386,10 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
     m.bufferGrows  = bufferGrows_;
     m.running      = 1;
     m.activeVoices = grainEngine_.activeVoices();
+    const bool obs = grainEngine_.observatory();
+    m.chaosX = obs ? grainEngine_.chaosX() : modEngine_.lorenzOut(0);
+    m.chaosY = obs ? grainEngine_.chaosY() : modEngine_.lorenzOut(1);
+    m.chaosZ = obs ? grainEngine_.chaosZ() : modEngine_.lorenzOut(2);
     auto latency   = stream->calculateLatencyMillis();
     m.latencyMs    = latency ? static_cast<float>(latency.value()) : 0.0f;
     meters_.publish();
@@ -448,21 +526,20 @@ int32_t Engine::profileAndSetVoiceCap() {
     }
     SourceBuffer bench(std::move(ch), static_cast<int32_t>(kSr));
 
-    GrainScheduler sched;
-    sched.configure(kSr);
-    sched.setSource(&bench);
-    sched.setMaxVoices(kMaxGrains);
-    sched.setDensity(200.0f);
-    sched.setGrainSizeMs(1200.0f);
-    sched.setSpread(1.0f);
-    sched.setPitchSpraySemitones(12.0f);
-    sched.setReverseProb(0.5f);
+    auto grains = std::make_unique<GrainEngine>();
+    grains->configure(kSr);
+    grains->setSource(&bench);
+    grains->setMaxVoices(kMaxGrains);
+    grains->setDensity(200.0f);
+    grains->setGrainSizeMs(1200.0f);
+    grains->setSpread(1.0f);
+    grains->setPitchSpraySemitones(12.0f);
+    grains->setReverseProb(0.5f);
 
     std::vector<float> buf(192 * 2);
     const auto t0 = std::chrono::steady_clock::now();
     for (int32_t done = 0; done < kProfileFrames; done += 192) {
-        std::fill(buf.begin(), buf.end(), 0.0f);
-        sched.renderBlock(buf.data(), 192);
+        grains->renderBlock(buf.data(), 192);
     }
     const auto t1 = std::chrono::steady_clock::now();
     const double elapsedSec =
@@ -477,6 +554,19 @@ int32_t Engine::profileAndSetVoiceCap() {
     grainEngine_.setMaxVoices(cap);
     LOGI("device profile: %.1f%% CPU at 256 voices -> voice cap %d", loadFraction * 100.0, cap);
     return cap;
+}
+
+// ---------------------------------------------------------------- visuals
+
+bool Engine::spectrum(float* magnitudes) {
+    // try_lock: opening and closing the stream reallocate the capture ring
+    // under this lock, and a skipped frame of the visuals costs nothing.
+    std::unique_lock<std::mutex> lock(lifecycleLock_, std::try_to_lock);
+    if (!lock.owns_lock() || !stream_) return false;
+    float samples[Spectrum::kSize];
+    if (!captureRing_.latestMono(samples, Spectrum::kSize)) return false;
+    Spectrum::magnitudes(samples, magnitudes);
+    return true;
 }
 
 // ---------------------------------------------------------------- reporting

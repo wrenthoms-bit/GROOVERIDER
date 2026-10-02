@@ -12,7 +12,7 @@ object GrooveriderEngine {
         System.loadLibrary("grooverider")
     }
 
-    private val meterScratch = FloatArray(9)
+    private val meterScratch = FloatArray(12)
 
     // ---- lifecycle / transport -------------------------------------------
     fun create() = nativeCreate()
@@ -52,6 +52,36 @@ object GrooveriderEngine {
     fun setChaosRate(v01: Float) = setParam(ParamId.CHAOS_RATE, v01)
     fun setChaosEnabled(on: Boolean) = nativeSetChaosEnabled(on)
 
+    // ---- Observatory (core/Observatory.h) ----------------------------------
+    /** Off = the plain grain engine, as Seeds saved before the Observatory expect. */
+    fun setObservatory(on: Boolean) = setParam(ParamId.OBSERVATORY, if (on) 1f else 0f)
+    fun setChaos(v01: Float) = setParam(ParamId.CHAOS, v01)
+    fun setPitchAmount(v01: Float) = setParam(ParamId.PITCH_AMOUNT, v01)
+    fun setKey(key: Int) = setParam(ParamId.KEY, key.toFloat())
+    fun setScale(scale: Int) = setParam(ParamId.SCALE, scale.toFloat())
+    fun setRegister(semitones: Float) = setParam(ParamId.REGISTER, semitones)
+    fun setDetune(semitones: Float) = setParam(ParamId.DETUNE, semitones)
+    fun setDrone(on: Boolean) = setParam(ParamId.DRONE, if (on) 1f else 0f)
+    fun setSpace(v01: Float) = setParam(ParamId.SPACE, v01)
+    fun setShimmer(v01: Float) = setParam(ParamId.SHIMMER, v01)
+    fun setTone(v01: Float) = setParam(ParamId.TONE, v01)
+    fun setScan(rate: Float) = setParam(ParamId.SCAN, rate)
+
+    /**
+     * Held keyboard notes, as semitones from middle C (at most 16). Each new
+     * grain takes one of them as its pitch centre; an empty list returns the
+     * cloud to key + register.
+     */
+    fun setNotes(semitones: List<Float>) {
+        val notes = semitones.take(MAX_NOTES)
+        setParam(ParamId.NOTES_BEGIN, notes.size.toFloat())
+        notes.forEach { setParam(ParamId.NOTE_VALUE, it) }
+    }
+    const val MAX_NOTES = 16
+
+    /** Off stops new grains: those sounding finish and the space rings on. */
+    fun setPlaying(on: Boolean) = setParam(ParamId.PLAYING, if (on) 1f else 0f)
+
     // ---- source preview (M1) ---------------------------------------------
     /**
      * Load interleaved float PCM as the preview source, resampling from
@@ -89,10 +119,22 @@ object GrooveriderEngine {
             xruns = meterScratch[4].toInt(), bufferFrames = meterScratch[5].toInt(),
             bufferGrows = meterScratch[6].toInt(), running = meterScratch[7] > 0.5f,
             activeVoices = meterScratch[8].toInt(),
+            chaosX = meterScratch[9], chaosY = meterScratch[10], chaosZ = meterScratch[11],
         )
     }
 
     fun configDescription(): String = nativeConfigDescription()
+
+    /** Bins [spectrum] fills: an FFT of the newest 2048 frames of output. */
+    const val SPECTRUM_BINS = 1024
+
+    /**
+     * For the visuals: linear magnitudes of the output's spectrum into [out]
+     * ([SPECTRUM_BINS] floats; a full-scale sine reads about 0.21). False, and
+     * [out] untouched, when the engine is not running. Safe from any thread;
+     * it never involves the audio thread.
+     */
+    fun spectrum(out: FloatArray): Boolean = nativeSpectrum(out)
 
     /** Adaptive voice cap (spec 8.4, M8): 256 flagship / 128 mid-tier / 64 floor. */
     fun profileAndSetVoiceCap(): Int = nativeProfileAndSetVoiceCap()
@@ -102,10 +144,13 @@ object GrooveriderEngine {
     fun captureSampleRate(): Int = nativeCaptureSampleRate()
 
     /**
-     * Renders offline at 2x oversample (spec 6.3). [params] is exactly 14
-     * floats in the order: density, timingJitter, grainSizeMs, sizeJitter,
-     * position, sprayMs, drift, pitchSt, pitchSpraySt, reverseProb, spread,
-     * outputWidth, outputGain, chaosRate.
+     * Renders offline (spec 6.3): at 2x oversample without the Observatory;
+     * with it, exactly as the live engine runs, plus the reverb tail. [params]
+     * is exactly [OFFLINE_PARAM_COUNT] floats in the order: density,
+     * timingJitter, grainSizeMs, sizeJitter, position, sprayMs, drift, pitchSt,
+     * pitchSpraySt, reverseProb, spread, outputWidth, outputGain, chaosRate,
+     * then the Observatory's chaos, pitchAmount, key, scale, register, detune,
+     * drone, space, shimmer, tone, scan.
      */
     fun offlineRender(
         pcm: FloatArray,
@@ -113,19 +158,23 @@ object GrooveriderEngine {
         srcRate: Int,
         dstRate: Int,
         params: FloatArray,
+        notes: FloatArray,
         windowType: Int,
         chaosEnabled: Boolean,
+        observatory: Boolean,
         masterSeed: Long,
         durationSeconds: Double,
         seamlessLoop: Boolean,
         crossfadeSeconds: Double,
     ): FloatArray {
-        require(params.size == 14) { "offlineRender params must have exactly 14 floats" }
+        require(params.size == OFFLINE_PARAM_COUNT) { "offlineRender params must have exactly $OFFLINE_PARAM_COUNT floats" }
         return nativeOfflineRender(
-            pcm, channels, srcRate, dstRate, params, windowType, chaosEnabled,
+            pcm, channels, srcRate, dstRate, params, notes, windowType, chaosEnabled, observatory,
             masterSeed, durationSeconds, seamlessLoop, crossfadeSeconds,
         )
     }
+
+    const val OFFLINE_PARAM_COUNT = 25
 
     private const val MAX_GRAINS = 256
     private const val CLOUD_STRIDE = 5
@@ -163,13 +212,14 @@ object GrooveriderEngine {
     private external fun nativeSetChaosEnabled(on: Boolean)
     private external fun nativePollMeters(out: FloatArray)
     private external fun nativePollCloud(out: FloatArray)
+    private external fun nativeSpectrum(out: FloatArray): Boolean
     private external fun nativeConfigDescription(): String
     private external fun nativeProfileAndSetVoiceCap(): Int
     private external fun nativeCaptureSnapshot(seconds: Double): ShortArray
     private external fun nativeCaptureSampleRate(): Int
     private external fun nativeOfflineRender(
         pcm: FloatArray, channels: Int, srcRate: Int, dstRate: Int,
-        params: FloatArray, windowType: Int, chaosEnabled: Boolean,
+        params: FloatArray, notes: FloatArray, windowType: Int, chaosEnabled: Boolean, observatory: Boolean,
         masterSeed: Long, durationSeconds: Double, seamlessLoop: Boolean, crossfadeSeconds: Double,
     ): FloatArray
 

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,12 @@ import com.delrogue.grooverider.render.ShareExporter
 import com.delrogue.grooverider.ui.EngineViewModel
 import com.delrogue.grooverider.ui.HelpButton
 import com.delrogue.grooverider.ui.HelpDialog
+import com.delrogue.grooverider.ui.KEY_NAMES
+import com.delrogue.grooverider.ui.SCALE_NAMES
+import com.delrogue.grooverider.midi.MidiTarget
+import com.delrogue.grooverider.onboarding.FactoryContent
+import com.delrogue.grooverider.ui.cloud.gl.ObservatoryBackdrop
+import com.delrogue.grooverider.ui.cloud.gl.ObservatoryGlView
 import com.delrogue.grooverider.ui.source.SourceViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.pow
@@ -81,14 +88,31 @@ fun CloudScreen(
     val frozen by vm.frozen.collectAsStateWithLifecycle()
     val canGoBack by vm.canGoBackInLineage.collectAsStateWithLifecycle()
     val seedName by vm.seedName.collectAsStateWithLifecycle()
-    val cloud by vm.cloud.collectAsStateWithLifecycle()
     val captureHint by vm.captureHint.collectAsStateWithLifecycle()
+    val subtitle by vm.subtitle.collectAsStateWithLifecycle()
+    val chord by vm.chord.collectAsStateWithLifecycle()
+    val keysMode by vm.keysMode.collectAsStateWithLifecycle()
+    val midiDevices by vm.midiDevices.collectAsStateWithLifecycle()
+    val midiArmed by vm.midiArmed.collectAsStateWithLifecycle()
+    val midiBound by vm.midiBound.collectAsStateWithLifecycle()
+    val midiNote by vm.midiNote.collectAsStateWithLifecycle()
+    var showDetail by remember { mutableStateOf(false) }
     val captureReview by vm.captureReview.collectAsStateWithLifecycle()
     val rendering by vm.rendering.collectAsStateWithLifecycle()
     val selectedSource by sourceVm.selected.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
     var showHelp by remember { mutableStateOf(false) }
+    // The Observatory visuals need OpenGL ES 3.0. Where that is missing, or
+    // turns out not to work, the original canvas cloud is drawn instead.
+    var glVisuals by remember { mutableStateOf(ObservatoryGlView.isSupported(context)) }
+
+    LaunchedEffect(midiNote) {
+        if (midiNote != null && midiArmed == null) {      // an armed control keeps its prompt up until it is bound
+            delay(3000)
+            vm.dismissMidiNote()
+        }
+    }
 
     LaunchedEffect(captureHint) {
         if (captureHint != null) {
@@ -98,7 +122,15 @@ fun CloudScreen(
     }
 
     Box(modifier.fillMaxSize().background(kBackground)) {
-        CloudCanvas(
+        if (glVisuals) {
+            ObservatoryBackdrop(vm, Modifier.fillMaxSize(), onUnavailable = { glVisuals = false })
+        }
+        // Over the Observatory this layer is see-through and draws only the
+        // playing surface (waveform, position, cursor). On its own it is the
+        // whole picture, grains included.
+        CloudLayer(
+            vm = vm,
+            overlay = glVisuals,
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
@@ -108,7 +140,7 @@ fun CloudScreen(
                         onRotateDelta = vm::onCanvasRotate,
                         onLongPress = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            vm.setFrozen(!frozen)
+                            vm.onLongPress()
                         },
                         onDoubleTap = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -120,10 +152,11 @@ fun CloudScreen(
                         },
                     )
                 },
-            grains = cloud.grains,
             peaks = selectedSource?.peaks ?: FloatArray(0),
             position = grain.position,
-            pitchSt = grain.pitchSt,
+            // where the cursor sits up and down: tone with the Observatory, pitch without
+            cursorHeight = if (grain.observatory) grain.tone * 2f - 1f
+                else ((2f.pow(grain.pitchSt / 12f) - 1f) / 2f).coerceIn(-1f, 1f),
             sprayMs = grain.sprayMs,
             sourceDurationMs = selectedSource?.let {
                 if (it.record.sampleRate > 0) it.record.frames * 1000L / it.record.sampleRate else 0L
@@ -138,6 +171,9 @@ fun CloudScreen(
                 .background(Brush.verticalGradient(listOf(kScrim.copy(alpha = 0.85f), Color.Transparent)))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             seedName = seedName,
+            subtitle = subtitle,
+            presets = vm.factoryPresets,
+            onPreset = vm::loadPreset,
             peak = meters.peakL,
             voices = meters.activeVoices,
             canGoBack = canGoBack,
@@ -147,21 +183,38 @@ fun CloudScreen(
             onHelp = { showHelp = true },
         )
 
-        CornerDial(Modifier.align(Alignment.TopStart).padding(top = 56.dp, start = 8.dp)) {
-            MacroKnob("TEXTURE", macro.texture, "texture" in macroLocks,
-                { vm.toggleMacroLock("texture") }, vm::setMacroTexture)
-        }
-        CornerDial(Modifier.align(Alignment.TopEnd).padding(top = 56.dp, end = 8.dp)) {
-            MacroKnob("PITCH", macro.pitch, "pitch" in macroLocks,
-                { vm.toggleMacroLock("pitch") }, vm::setMacroPitch)
-        }
-        CornerDial(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 8.dp)) {
-            MacroKnob("DRIFT", macro.drift, "drift" in macroLocks,
-                { vm.toggleMacroLock("drift") }, vm::setMacroDrift)
-        }
-        CornerDial(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 8.dp)) {
-            MacroKnob("SPACE", macro.space, "space" in macroLocks,
-                { vm.toggleMacroLock("space") }, vm::setMacroSpace)
+        // The four rings, in the corners where thumbs rest.
+        @Composable
+        fun ring(target: MidiTarget, label: String, value: Float, onValue: (Float) -> Unit, modifier: Modifier) =
+            MacroRing(label, value, onValue, onReset = { vm.resetMacro(target) }, onLearn = { vm.armMidi(target) },
+                armed = midiArmed == target, bound = midiBound[target], modifier = modifier)
+        ring(MidiTarget.TEXTURE, "TEXTURE", macro.texture, vm::setMacroTexture,
+            Modifier.align(Alignment.TopStart).padding(top = 58.dp, start = 14.dp))
+        ring(MidiTarget.PITCH, "PITCH", macro.pitch, vm::setMacroPitch,
+            Modifier.align(Alignment.TopEnd).padding(top = 58.dp, end = 14.dp))
+        ring(MidiTarget.DRIFT, "DRIFT", macro.drift, vm::setMacroDrift,
+            Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 6.dp))
+        ring(MidiTarget.SPACE, "SPACE", macro.space, vm::setMacroSpace,
+            Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 6.dp))
+
+        // Drone, tuning and the way into the fine controls. They belong to the
+        // Observatory, so they dim on a Seed that does not use it.
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DroneButton(grain.drone, enabled = grain.observatory, armed = midiArmed == MidiTarget.DRONE,
+                onToggle = { vm.setDroneOn(!grain.drone) }, onLearn = { vm.armMidi(MidiTarget.DRONE) })
+            PickerChip(KEY_NAMES[grain.key.coerceIn(0, 11)], KEY_NAMES, grain.key, grain.observatory, vm::setKey)
+            PickerChip(SCALE_NAMES[grain.scale.coerceIn(0, 6)], SCALE_NAMES, grain.scale, grain.observatory, vm::setScale)
+            Text(
+                if (midiDevices.isEmpty()) "Detail" else "Detail ◉",
+                color = kInk, style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier
+                    .background(kScrim.copy(alpha = 0.7f), RoundedCornerShape(50))
+                    .clickable { showDetail = !showDetail }
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            )
         }
 
         if (frozen) {
@@ -177,18 +230,31 @@ fun CloudScreen(
             )
         }
 
-        captureHint?.let {
+        (captureHint ?: midiNote)?.let {
             Text(
                 it,
                 color = Color(0xFFB0B0B8),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 8.dp)
-                    .background(kScrim.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .padding(bottom = 58.dp)
+                    .background(kScrim.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
+
+        DetailPanel(
+            visible = showDetail, onClose = { showDetail = false },
+            shimmer = grain.shimmer, onShimmer = vm::setShimmer,
+            tone = grain.tone, onTone = vm::setTone,
+            register = grain.register, onRegister = vm::setRegister,
+            scan = grain.scan, onScan = vm::setScan, scanLatched = grain.drone,
+            keysMode = keysMode, onKeysMode = vm::setKeysMode,
+            chord = chord, onClearChord = vm::clearChord,
+            midiDevices = midiDevices,
+            midiArmed = midiArmed, midiBound = midiBound, onLearn = vm::armMidi, onForget = vm::forgetMidiBindings,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
     }
 
     captureReview?.let { capture ->
@@ -207,13 +273,7 @@ fun CloudScreen(
     if (showHelp) {
         HelpDialog(
             title = "Cloud",
-            body = "Drag anywhere to scrub position (left/right) and pitch " +
-                "(up/down) -- the cursor shows where you're reaching into the " +
-                "grain cloud. Pinch to change stereo width, twist two fingers " +
-                "for drift, long-press to freeze, double-tap to re-roll a " +
-                "fresh variation, three-finger tap to capture the last 60 " +
-                "seconds. The four corner dials lock and fine-tune " +
-                "Texture/Pitch/Drift/Space.",
+            body = CLOUD_HELP,
             onDismiss = { showHelp = false },
         )
     }
@@ -223,6 +283,9 @@ fun CloudScreen(
 private fun CloudHeader(
     modifier: Modifier,
     seedName: String,
+    subtitle: String,
+    presets: List<FactoryContent.Preset>,
+    onPreset: (String) -> Unit,
     peak: Float,
     voices: Int,
     canGoBack: Boolean,
@@ -251,7 +314,7 @@ private fun CloudHeader(
                         .padding(end = 8.dp),
                 )
             }
-            Text(seedName, color = Color.White, style = MaterialTheme.typography.titleMedium)
+            PresetTitle(seedName, subtitle, presets, onPreset, Modifier.widthIn(max = 360.dp))
             HelpButton(onClick = onHelp, modifier = Modifier.padding(start = 10.dp), color = Color(0xFF6A6A70))
         }
         MeterBar(peak = peak, modifier = Modifier.width(120.dp))
@@ -274,29 +337,44 @@ private fun MeterBar(peak: Float, modifier: Modifier = Modifier) {
     }
 }
 
-/** A small translucent chip that hosts one macro dial over the canvas. */
+/**
+ * The canvas layer. Reading the grain cloud redraws at 60 frames a second, so
+ * it is only collected here, and only when this layer is the one drawing the
+ * grains.
+ */
 @Composable
-private fun CornerDial(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Box(
-        modifier
-            .width(130.dp)
-            .background(kScrim.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-            .padding(8.dp),
-    ) { content() }
+private fun CloudLayer(
+    vm: EngineViewModel,
+    overlay: Boolean,
+    modifier: Modifier,
+    peaks: FloatArray,
+    position: Float,
+    cursorHeight: Float,
+    sprayMs: Float,
+    sourceDurationMs: Long,
+    frozen: Boolean,
+) {
+    if (overlay) {
+        CloudCanvas(modifier, true, emptyList(), peaks, position, cursorHeight, sprayMs, sourceDurationMs, frozen)
+    } else {
+        val cloud by vm.cloud.collectAsStateWithLifecycle()
+        CloudCanvas(modifier, false, cloud.grains, peaks, position, cursorHeight, sprayMs, sourceDurationMs, frozen)
+    }
 }
 
 @Composable
 private fun CloudCanvas(
     modifier: Modifier,
+    overlay: Boolean,
     grains: List<GrainVisual>,
     peaks: FloatArray,
     position: Float,
-    pitchSt: Float,
+    cursorHeight: Float,        // -1 .. 1, bottom to top
     sprayMs: Float,
     sourceDurationMs: Long,
     frozen: Boolean,
 ) {
-    Canvas(modifier.background(Color(0xFF0B0B0E))) {
+    Canvas(if (overlay) modifier else modifier.background(Color(0xFF0B0B0E))) {
         val w = size.width
         val h = size.height
         val waveTop = h * 0.55f
@@ -305,14 +383,12 @@ private fun CloudCanvas(
         // Touch cursor: last touched position/pitch, plotted on the same
         // axes the grains use, so it sits exactly among the grains it is
         // spawning. Holds still after lift -- no snap-back (spec 5.3).
-        val cursorPitchRatio = 2f.pow(pitchSt / 12f)
-        val cursorPitchNorm = ((cursorPitchRatio - 1f) / 2f).coerceIn(-1f, 1f)
         val cursorX = position * w
-        val cursorY = h * 0.5f - cursorPitchNorm * (h * 0.4f)
+        val cursorY = h * 0.5f - cursorHeight.coerceIn(-1f, 1f) * (h * 0.4f)
         val cursorColor = if (frozen) Color(0xFF3FA7FF) else Color(0xFFE0574D)
 
         // Faint vignette so the field has depth instead of a flat fill.
-        drawRect(
+        if (!overlay) drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xFF17171D), Color(0xFF0B0B0E)),
                 center = Offset(w * 0.5f, h * 0.42f),
@@ -320,6 +396,8 @@ private fun CloudCanvas(
             ),
             size = size,
         )
+        // Over the Observatory the waveform is a faint guide, not a wall.
+        val waveAlpha = if (overlay) 0.35f else 1f
 
         // Waveform -- bars near the cursor's column pick up its colour, so
         // the source and the touch that's reaching into it read as linked.
@@ -332,7 +410,7 @@ private fun CloudCanvas(
                 val proximity = (1f - (kotlin.math.abs(barX - cursorX) / reach).coerceIn(0f, 1f))
                 val tint = lerp(Color(0xFF3C3C44), cursorColor, proximity * 0.55f)
                 drawRect(
-                    color = tint,
+                    color = tint.copy(alpha = waveAlpha),
                     topLeft = Offset(barX, waveTop - amp / 2f),
                     size = Size(barW * 0.8f, amp),
                 )
@@ -358,7 +436,7 @@ private fun CloudCanvas(
         }
 
         // Position marker.
-        drawRect(Color(0xFFE0E0E6), topLeft = Offset(position * w - 1f, 0f),
+        drawRect(Color(0xFFE0E0E6).copy(alpha = if (overlay) 0.5f else 1f), topLeft = Offset(position * w - 1f, 0f),
             size = Size(2f, h))
 
         // Grain particles: a soft additive halo plus a bright core, on a
@@ -440,36 +518,6 @@ private fun hsvColor(hue01: Float, saturation: Float, value: Float): Color {
 }
 
 @Composable
-private fun MacroKnob(
-    label: String,
-    value: Float,
-    locked: Boolean,
-    onToggleLock: () -> Unit,
-    onValue: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                (if (locked) "🔒 " else "") + label,
-                color = if (locked) Color(0xFF3FA7FF) else Color(0xFFB0B0B8),
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.clickable(onClick = onToggleLock),
-            )
-        }
-        Slider(
-            value = value,
-            onValueChange = onValue,
-            enabled = !locked,
-            colors = SliderDefaults.colors(
-                thumbColor = Color(0xFFE0574D),
-                activeTrackColor = Color(0xFFE0574D).copy(alpha = 0.6f),
-            ),
-        )
-    }
-}
-
-@Composable
 private fun LockLandscape() {
     val context = LocalContext.current
     DisposableEffect(Unit) {
@@ -490,3 +538,30 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
+
+private const val CLOUD_HELP =
+    "Headphones help. The stereo width and the drones are a big part of the sound, and a phone speaker loses most of that.\n\n" +
+    "SHAPE IT\n" +
+    "• Drag left and right to move through the sound, up and down to make it brighter or darker.\n" +
+    "• TEXTURE goes from long, smooth grains to short, dense ones.\n" +
+    "• DRIFT sets how far and how fast the sound wanders on its own. Low drifts over minutes; high churns.\n" +
+    "• SPACE is the reverb, from a room to an ocean. PITCH is how far the grains scatter in pitch.\n" +
+    "• DRONE holds one spot in the sound and lets it evolve endlessly. A long press on the field does the same.\n" +
+    "• KEY and SCALE keep everything in tune. Choose Free to unlock. Key assumes the sound is in C.\n" +
+    "• Detail opens the fine controls: shimmer, tone, register and scan.\n" +
+    "• Tap the name at the top for the other presets.\n\n" +
+    "CONTROLS\n" +
+    "• Rings: drag up or right for more, down or left for less. Double-tap returns to the preset's value.\n" +
+    "• Pinch for SPACE, twist two fingers to scan through the sound, double-tap the field for a new variation.\n" +
+    "• Three-finger tap, or the record button, keeps the last 60 seconds as a WAV with its reverb tail.\n\n" +
+    "MIDI KEYBOARD AND KNOBS\n" +
+    "• Plug a USB MIDI keyboard into the phone and just play: notes set the pitch, and chords spread the cloud across the notes. A sustain pedal holds them.\n" +
+    "• In Detail, Latch keeps a chord after you let go; Gate only sounds while keys are held.\n" +
+    "• Knobs: long-press a ring, or a slider's name in Detail, then turn a knob. For DRONE, long-press it, then hit a pad.\n" +
+    "• Your mappings are remembered.\n\n" +
+    "TIPS\n" +
+    "• Long, sustained sounds -- voice, strings, field recordings -- make the best pads and drones.\n" +
+    "• For a drone: DRONE on, SPACE high, DRIFT low. Then leave it alone for a minute -- it keeps changing.\n" +
+    "• For movement: DRONE off, raise DRIFT, and nudge Scan in Detail.\n" +
+    "• Shimmer adds a halo an octave up. A little goes a long way.\n" +
+    "• On a Seed made before the Observatory, the rings and gestures work as they always did, and DRONE, key and scale are dimmed."

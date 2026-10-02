@@ -5,8 +5,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.delrogue.grooverider.AppPrefs
 import com.delrogue.grooverider.audio.AudioEngineService
-import com.delrogue.grooverider.engine.GrooveriderEngine
-import com.delrogue.grooverider.seed.SeedRepository
 import com.delrogue.grooverider.source.SourceRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +14,6 @@ import kotlinx.coroutines.launch
 
 class OnboardingViewModel(app: Application) : AndroidViewModel(app) {
     private val sourceRepo = SourceRepository(app)
-    private val seedRepo = SeedRepository(app)
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -31,13 +28,13 @@ class OnboardingViewModel(app: Application) : AndroidViewModel(app) {
             AudioEngineService.start(getApplication())
             delay(400)   // let the stream open before pushing a source into it
 
+            // A second, synthetic source so there is something to try a preset on.
             val demo = DemoSourceGenerator.generate()
-            val record = sourceRepo.importSynthetic(demo, channels = 1, sampleRate = 48000, name = "First Light demo")
-            sourceRepo.loadIntoEngine(record.hash)
+            sourceRepo.importSynthetic(demo, channels = 1, sampleRate = 48000, name = "First Light demo")
 
-            FactoryContent.presets(record.hash).forEach { seedRepo.importSeed(it) }
-
-            GrooveriderEngine.setChaosEnabled(true)   // First Light, unassisted (spec 4.5)
+            // Big River and the presets; the main screen then opens on Standing Room Only.
+            FactoryInstaller.ensure(getApplication())
+            AppPrefs.setOpenOnDefaultPreset(getApplication(), true)
             AppPrefs.setOnboarded(getApplication())
             _busy.value = false
             _done.value = true

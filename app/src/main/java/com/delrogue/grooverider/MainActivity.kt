@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.delrogue.grooverider.onboarding.OnboardingScreen
 import com.delrogue.grooverider.ui.DebugPanelScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.delrogue.grooverider.ui.EngineViewModel
 import com.delrogue.grooverider.ui.cloud.CloudScreen
 import com.delrogue.grooverider.ui.library.SeedLibraryScreen
 import com.delrogue.grooverider.ui.source.SourceScreen
@@ -37,7 +40,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // light status and navigation icons, over the app's own dark background
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent {
             GROOVERIDERTheme {
                 var onboarded by remember { mutableStateOf(AppPrefs.isOnboarded(this@MainActivity)) }
@@ -49,7 +56,11 @@ class MainActivity : ComponentActivity() {
                     return@GROOVERIDERTheme
                 }
 
-                LaunchedEffect(Unit) { ensurePermissions() }
+                val engineVm: EngineViewModel = viewModel()
+                LaunchedEffect(Unit) {
+                    ensurePermissions()
+                    engineVm.onAppReady()
+                }
 
                 var tab by remember { mutableIntStateOf(0) }
                 Scaffold(

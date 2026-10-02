@@ -14,7 +14,7 @@ Exit code 0 means every check passed.
 
 ## engine.test.mjs
 
-Runs the page's `ObservatoryEngine` class in Node against the real `core/grooverider.wasm`. The class is read straight out of `docs/index.html` (between the `ENGINE-BEGIN` and `ENGINE-END` markers), so it tests exactly what ships.
+Runs the page's `ObservatoryEngine` class in Node against the real `core/grooverider.wasm`. The class is read straight out of `docs/index.html` (between the `ENGINE-BEGIN` and `ENGINE-END` markers), so it tests exactly what ships. The class is a thin wrapper now: the engine itself is the shared C++ in `core/`, so these checks exercise the same code the Android app runs.
 
 | Area | Check |
 |---|---|
@@ -27,13 +27,13 @@ Runs the page's `ObservatoryEngine` class in Node against the real `core/groover
 | MIDI keyboard | grains land on the held notes; with scale-lock they stay in key; clearing returns to key + register |
 | Determinism | same seed and settings give a bit-identical render |
 
-This class is the reference the Android port is matched against (see `ANDROID_OBSERVATORY_BRIEF.md`). If a change to the engine alters these numbers, it has changed the sound.
+If a change to `core/` alters these numbers, it has changed the sound, on the web and on the phone alike. Remember that the page uses the copy of the wasm embedded in `index.html`: after changing `core/`, run `../core/reinline.sh`.
 
 ## browser.test.mjs
 
 Drives the real page in headless Chrome. It serves `docs/` on a local port itself.
 
-It covers: auto-play of the default preset, ring and pad controls, MIDI-learn, all presets, WAV export with its tail, import, mic recording, MIDI keyboard playing (latch, gate, sustain), the sample library menu, the help panel and start-screen tips, and the Canvas2D fallback.
+It covers: auto-play of the default preset, ring and pad controls, MIDI-learn, all presets, WAV export with its tail, import, mic recording, MIDI keyboard playing (latch, gate, sustain), the sample library menu, the help panel and start-screen tips, the Canvas2D fallback, and seed files (loading one in the phone app's format, save and load round trip, a plain-engine seed, a file that is not a seed).
 
 What it does **not** prove: MIDI devices, the microphone and the iPhone are simulated. It checks the page's own logic, not real hardware, real Safari, or how anything sounds.
 

@@ -31,6 +31,12 @@ implementation for this brief.** It contains:
 `GrainScheduler` and the web's `core/GrainCore.h`. Seeds won't sound the same on both until
 that's resolved.
 
+*Update, 2 Oct 2026:* resolved on `feat/android-observatory`. After the Phase 0 audit Wren chose
+option (a): `GrainScheduler` and `VoicePool` are gone and Android now runs `core/GrainCore.h`
+through `engine/GrainEngine.h`. Wherever a later phase says "the Android engine", that is what it means.
+Phases 1 to 5 are done on the same branch: `core/Observatory.h` runs in both apps (the JavaScript
+`ObservatoryEngine` is now a thin wrapper over the WASM), and both read and write the same `.grvr` seed file.
+
 ## Working rules
 
 - Branch `feat/android-observatory` off an up-to-date `main`. If the working tree is dirty or you're on another branch, **stop and ask Wren** before switching.

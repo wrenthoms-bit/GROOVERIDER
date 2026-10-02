@@ -7,13 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "../dsp/OutputStage.h"
 #include "../dsp/Smoother.h"
 #include "../io/SourceBuffer.h"
 #include "../io/ParamRing.h"
 #include "../io/TripleBuffer.h"
 #include "../io/CaptureRing.h"
-#include "GrainScheduler.h"
+#include "GrainEngine.h"
 #include "ModEngine.h"
 #include "ParamId.h"
 
@@ -30,6 +29,7 @@ struct Meters {
     int32_t bufferGrows = 0;      // times we widened the buffer after an xrun
     int32_t running     = 0;
     int32_t activeVoices= 0;      // concurrent grains (spec 1.2)
+    float chaosX = 0.0f, chaosY = 0.0f, chaosZ = 0.0f;   // the chaos in charge, each -1 .. 1, for the visuals
 };
 
 /// M0 engine: opens an Oboe stream and renders a smoothed test tone.
@@ -67,7 +67,7 @@ public:
     /// Runs a short synthetic benchmark and picks a voice-cap tier -- 256
     /// flagship / 128 mid-tier / 64 floor (spec 8.4, M8). Call off the audio
     /// thread: it renders ~1s of throwaway audio on its own scratch
-    /// GrainScheduler to measure, then applies the result to grainEngine_'s
+    /// GrainEngine to measure, then applies the result to grainEngine_'s
     /// voice cap (safe to call while the real engine is running -- the cap
     /// is atomic).
     int32_t profileAndSetVoiceCap();
@@ -79,6 +79,13 @@ public:
     /// [seconds] of what was actually heard, oldest-first, interleaved int16.
     std::vector<int16_t> captureSnapshot(double seconds) const { return captureRing_.snapshot(seconds); }
     int32_t captureSampleRate() const noexcept { return captureRing_.sampleRate(); }
+
+    /// Any non-audio thread, for the visuals: the magnitude spectrum of the
+    /// newest Spectrum::kSize frames of output into `magnitudes` (Spectrum::kBins
+    /// floats). False, and nothing written, if the engine is not running or is
+    /// busy being opened or closed. Only reads the capture ring -- the audio
+    /// thread is not involved.
+    bool spectrum(float* magnitudes);
 
     // --- source preview (M1). UI/IO thread builds the buffer; the audio thread
     //     picks it up through a one-deep retirement handoff (no lock, no free
@@ -126,7 +133,8 @@ private:
     Smoother fade_;
     double   phase_        = 0.0;
     float    sampleRate_   = 48000.0f;
-    bool     ftzDone_      = false;
+    bool     ftzDone_      = false;   // first-callback thread setup (flush-to-zero, core pinning) done
+    uint64_t fastCores_    = 0;       // the device's fastest cores, found when the stream opens
     int32_t  lastXRun_     = 0;
     int32_t  bufferGrows_  = 0;
     int32_t  burstFrames_  = 192;
@@ -154,18 +162,20 @@ private:
     std::atomic<bool>  restarting_ {false};
     std::atomic<float> stopFade_   {1.0f};   // driven to 0 for a clickless stop
 
-    // --- grain engine (M2). Grains render into grainMix_ and pass through
-    // their own OutputStage before being added to `out`; the M0 test tone and
+    // --- grain engine (M2): the shared core, output stage included. Grains
+    // render into grainMix_ before being added to `out`; the M0 test tone and
     // the M1 raw preview stay outside it so their diagnostic level readouts
     // remain exactly linear.
-    GrainScheduler grainEngine_;
+    GrainEngine    grainEngine_;
     ModEngine      modEngine_;
-    OutputStage    outputStage_;
     CaptureRing    captureRing_;
-    Smoother       outputWidth_;
-    Smoother       outputGain_;
     static constexpr int32_t kMaxBlockFrames = 8192;
     float grainMix_[kMaxBlockFrames * 2] = {};
+
+    // a chord on its way in through the param ring (kNotesBegin / kNoteValue)
+    float   pendingNotes_[grv::OBS_MAX_NOTES] = {};
+    int32_t pendingNoteCount_ = 0;
+    int32_t pendingNotesGot_  = 0;
 
     int32_t controlPeriodSamples_ = 48;   // 1 kHz control rate (spec 4.3)
     int32_t controlCountdown_     = 0;

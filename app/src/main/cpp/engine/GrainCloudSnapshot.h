@@ -1,9 +1,10 @@
 #pragma once
 #include <cstdint>
 
-#include "VoicePool.h"
-
 namespace grvr {
+
+/// Voice ceiling of the grain engine; GrainEngine.h asserts it matches the core's.
+constexpr int32_t kMaxGrains = 256;
 
 /// One grain, as the UI needs it (spec 1.2, 5.2): enough to plot a particle
 /// without the UI ever touching audio-thread state directly.

@@ -19,7 +19,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import com.delrogue.grooverider.ui.theme.Abyss
+import com.delrogue.grooverider.ui.theme.Dim
+import com.delrogue.grooverider.ui.theme.Panel
+import com.delrogue.grooverider.ui.theme.PanelCard
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import com.delrogue.grooverider.engine.EngineMeters
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -40,13 +49,20 @@ import kotlin.math.pow
 
 private const val SOAK_TARGET_SECONDS = 600L   // M0: ten minutes, zero xRuns
 
+private const val RECENT_SEEDS_SHOWN = 10
+
 @Composable
 fun DebugPanelScreen(
     modifier: Modifier = Modifier,
     vm: EngineViewModel = viewModel(),
     sourceVm: com.delrogue.grooverider.ui.source.SourceViewModel = viewModel(),
 ) {
-    val meters by vm.meters.collectAsStateWithLifecycle()
+    // The meters change ~30 times a second. Only the two small pieces that
+    // show them read the value; everything else needs just "is it running",
+    // which changes when the engine starts or stops. Reading the meters here
+    // instead would redraw every slider on the screen 30 times a second.
+    val metersState = vm.meters.collectAsStateWithLifecycle()
+    val running by remember { derivedStateOf { metersState.value.running } }
     val tone by vm.tone.collectAsStateWithLifecycle()
     val grain by vm.grain.collectAsStateWithLifecycle()
     val config by vm.config.collectAsStateWithLifecycle()
@@ -59,12 +75,12 @@ fun DebugPanelScreen(
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     var xrunsAtStart by remember { mutableLongStateOf(-1L) }
 
-    LaunchedEffect(meters.running) {
-        if (!meters.running) {
+    LaunchedEffect(running) {
+        if (!running) {
             elapsedSeconds = 0L
             xrunsAtStart = -1L
         } else {
-            if (xrunsAtStart < 0) xrunsAtStart = meters.xruns.toLong()
+            if (xrunsAtStart < 0) xrunsAtStart = metersState.value.xruns.toLong()
             while (true) {
                 delay(1000)
                 elapsedSeconds += 1
@@ -72,13 +88,12 @@ fun DebugPanelScreen(
         }
     }
 
-    val xrunsThisRun = if (xrunsAtStart < 0) 0 else (meters.xruns - xrunsAtStart).toInt()
-
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(Abyss)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Row(
@@ -86,56 +101,49 @@ fun DebugPanelScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("GROOVERIDER", style = MaterialTheme.typography.headlineMedium)
+            Column {
+                Text("Engine", color = Color.White, style = MaterialTheme.typography.headlineMedium)
+                Text("Raw controls and diagnostics", color = Dim, style = MaterialTheme.typography.bodySmall)
+            }
             HelpButton(onClick = { showHelp = true })
         }
-        Text(
-            "M0 — Skeleton & Signal Path",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
 
         // ---- transport ----------------------------------------------------
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
                 onClick = { vm.startEngine() },
-                enabled = !meters.running,
+                enabled = !running,
             ) { Text("Start engine") }
             OutlinedButton(
                 onClick = { vm.stopEngine() },
-                enabled = meters.running,
+                enabled = running,
             ) { Text("Stop") }
         }
 
         // ---- soak test ----------------------------------------------------
         SoakCard(
-            running = meters.running,
+            running = running,
             elapsedSeconds = elapsedSeconds,
-            xrunsThisRun = xrunsThisRun,
+            xrunsAtStart = xrunsAtStart,
+            meters = metersState,
         )
 
         // ---- stream readout -----------------------------------------------
-        Card(colors = CardDefaults.cardColors()) {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 SectionLabel("Granted stream")
                 Mono(config)
                 Spacer(Modifier.height(6.dp))
-                Readout("Latency", "%.2f ms".format(meters.latencyMs))
-                Readout("Buffer", "${meters.bufferFrames} frames")
-                Readout("Buffer widened", "${meters.bufferGrows}x after xRun")
-                Readout("xRuns (total)", "${meters.xruns}")
-                Readout("Callback load", "%.1f %%".format(meters.cpuLoad * 100f))
-                Readout("Peak", "%.3f".format(meters.peakL))
-                Readout("Active grains", "${meters.activeVoices}")
+                MeterReadouts(metersState)
                 OutlinedButton(
                     onClick = { vm.refreshConfig() },
-                    enabled = meters.running,
+                    enabled = running,
                 ) { Text("Re-read config") }
             }
         }
 
         // ---- tone controls -------------------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("Test tone")
 
@@ -148,7 +156,7 @@ fun DebugPanelScreen(
                     Switch(
                         checked = tone.enabled,
                         onCheckedChange = { vm.setToneEnabled(it) },
-                        enabled = meters.running,
+                        enabled = running,
                     )
                 }
 
@@ -158,27 +166,27 @@ fun DebugPanelScreen(
                     valueText = "%.1f Hz".format(tone.hz),
                     position = hzToPosition(tone.hz),
                     onPosition = { vm.setToneHz(positionToHz(it)) },
-                    enabled = meters.running,
+                    enabled = running,
                 )
                 LabelledSlider(
                     label = "Tone gain",
                     valueText = "%.2f".format(tone.gain),
                     position = tone.gain,
                     onPosition = { vm.setToneGain(it) },
-                    enabled = meters.running,
+                    enabled = running,
                 )
                 LabelledSlider(
                     label = "Master gain",
                     valueText = "%.2f".format(tone.masterGain),
                     position = tone.masterGain,
                     onPosition = { vm.setMasterGain(it) },
-                    enabled = meters.running,
+                    enabled = running,
                 )
             }
         }
 
         // ---- grain engine (M2) ---------------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -186,7 +194,7 @@ fun DebugPanelScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     SectionLabel("Grain engine")
-                    OutlinedButton(onClick = { vm.recallGrainDefaults() }, enabled = meters.running) {
+                    OutlinedButton(onClick = { vm.recallGrainDefaults() }, enabled = running) {
                         Text("Recall default")
                     }
                 }
@@ -199,42 +207,42 @@ fun DebugPanelScreen(
 
                 LabelledSlider("Density", "%.1f /s".format(grain.density),
                     logPosition(grain.density, 0.5f, 200f),
-                    { vm.setGrainDensity(logValue(it, 0.5f, 200f)) }, meters.running)
+                    { vm.setGrainDensity(logValue(it, 0.5f, 200f)) }, running)
                 LabelledSlider("Timing jitter", "%.2f".format(grain.timingJitter),
-                    grain.timingJitter, { vm.setGrainTimingJitter(it) }, meters.running)
+                    grain.timingJitter, { vm.setGrainTimingJitter(it) }, running)
                 LabelledSlider("Grain size", "%.0f ms".format(grain.grainSizeMs),
                     logPosition(grain.grainSizeMs, 5f, 2000f),
-                    { vm.setGrainSizeMs(logValue(it, 5f, 2000f)) }, meters.running)
+                    { vm.setGrainSizeMs(logValue(it, 5f, 2000f)) }, running)
                 LabelledSlider("Size jitter", "%.2f".format(grain.sizeJitter),
-                    grain.sizeJitter, { vm.setGrainSizeJitter(it) }, meters.running)
+                    grain.sizeJitter, { vm.setGrainSizeJitter(it) }, running)
                 LabelledSlider("Position", "%.2f".format(grain.position),
-                    grain.position, { vm.setGrainPosition(it) }, meters.running)
+                    grain.position, { vm.setGrainPosition(it) }, running)
                 LabelledSlider("Spray", "%.0f ms".format(grain.sprayMs),
-                    grain.sprayMs / 5000f, { vm.setGrainSprayMs(it * 5000f) }, meters.running)
+                    grain.sprayMs / 5000f, { vm.setGrainSprayMs(it * 5000f) }, running)
                 LabelledSlider("Drift", "%.2f".format(grain.drift),
-                    (grain.drift + 2f) / 4f, { vm.setGrainDrift(it * 4f - 2f) }, meters.running)
+                    (grain.drift + 2f) / 4f, { vm.setGrainDrift(it * 4f - 2f) }, running)
                 LabelledSlider("Pitch", "%.1f st".format(grain.pitchSt),
-                    (grain.pitchSt + 24f) / 48f, { vm.setGrainPitchSt(it * 48f - 24f) }, meters.running)
+                    (grain.pitchSt + 24f) / 48f, { vm.setGrainPitchSt(it * 48f - 24f) }, running)
                 LabelledSlider("Pitch spray", "%.2f st".format(grain.pitchSpraySt),
-                    grain.pitchSpraySt / 24f, { vm.setGrainPitchSpraySt(it * 24f) }, meters.running)
+                    grain.pitchSpraySt / 24f, { vm.setGrainPitchSpraySt(it * 24f) }, running)
                 LabelledSlider("Reverse prob.", "%.2f".format(grain.reverseProb),
-                    grain.reverseProb, { vm.setGrainReverseProb(it) }, meters.running)
+                    grain.reverseProb, { vm.setGrainReverseProb(it) }, running)
                 LabelledSlider("Spread", "%.2f".format(grain.spread),
-                    grain.spread, { vm.setGrainSpread(it) }, meters.running)
+                    grain.spread, { vm.setGrainSpread(it) }, running)
 
-                WindowTypeSelector(grain.windowType, vm::setGrainWindowType, meters.running)
+                WindowTypeSelector(grain.windowType, vm::setGrainWindowType, running)
 
                 Spacer(Modifier.height(4.dp))
                 SectionLabel("Output stage")
                 LabelledSlider("Width", "%.2f".format(grain.outputWidth),
-                    grain.outputWidth / 2f, { vm.setOutputWidth(it * 2f) }, meters.running)
+                    grain.outputWidth / 2f, { vm.setOutputWidth(it * 2f) }, running)
                 LabelledSlider("Gain", "%.2f".format(grain.outputGain),
-                    grain.outputGain, { vm.setOutputGain(it) }, meters.running)
+                    grain.outputGain, { vm.setOutputGain(it) }, running)
             }
         }
 
         // ---- modulation & chaos (M4) ----------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("Modulation & chaos")
                 Row(
@@ -246,11 +254,11 @@ fun DebugPanelScreen(
                     Switch(
                         checked = grain.chaosEnabled,
                         onCheckedChange = { vm.setChaosEnabled(it) },
-                        enabled = meters.running,
+                        enabled = running,
                     )
                 }
                 LabelledSlider("Chaos rate", "%.2f".format(grain.chaosRate),
-                    grain.chaosRate, { vm.setChaosRate(it) }, meters.running)
+                    grain.chaosRate, { vm.setChaosRate(it) }, running)
                 Text(
                     "Lorenz -> position/pitchSpray/spread, Drift A/B -> " +
                         "grainSize/density. Toggle off to A/B against a static cloud.",
@@ -260,8 +268,11 @@ fun DebugPanelScreen(
             }
         }
 
+        // ---- Observatory ------------------------------------------------------
+        ObservatoryCard(grain, vm, running)
+
         // ---- Seed persistence (M3) ------------------------------------------
-        Card {
+        PanelCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("Seed")
                 Row(
@@ -297,7 +308,12 @@ fun DebugPanelScreen(
                     seedLoadError?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
-                    seeds.forEach { seed ->
+                    // Newest few only. This screen redraws ~30 times a second for
+                    // the meters and is not a lazy list, so drawing every saved
+                    // seed here (hundreds, once Mutate has been used) pins the
+                    // main thread until the system reports the app as not
+                    // responding. The Library tab is the full, lazy browser.
+                    seeds.take(RECENT_SEEDS_SHOWN).forEach { seed ->
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -309,6 +325,13 @@ fun DebugPanelScreen(
                                 OutlinedButton(onClick = { vm.deleteSeed(seed) }) { Text("Delete") }
                             }
                         }
+                    }
+                    if (seeds.size > RECENT_SEEDS_SHOWN) {
+                        Text(
+                            "Showing the newest $RECENT_SEEDS_SHOWN. The Library tab has all ${seeds.size}.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -352,22 +375,80 @@ private fun WindowTypeSelector(selected: Int, onSelect: (Int) -> Unit, enabled: 
 }
 
 @Composable
-private fun SoakCard(running: Boolean, elapsedSeconds: Long, xrunsThisRun: Int) {
+private fun MeterReadouts(meters: State<EngineMeters>) {
+    val m = meters.value
+    Readout("Latency", "%.2f ms".format(m.latencyMs))
+    Readout("Buffer", "${m.bufferFrames} frames")
+    Readout("Buffer widened", "${m.bufferGrows}x after xRun")
+    Readout("xRuns (total)", "${m.xruns}")
+    Readout("Callback load", "%.1f %%".format(m.cpuLoad * 100f))
+    Readout("Peak", "%.3f".format(m.peakL))
+    Readout("Active grains", "${m.activeVoices}")
+}
+
+/** Raw controls for core/Observatory.h -- the proper performance controls come later. */
+@Composable
+private fun ObservatoryCard(grain: GrainState, vm: EngineViewModel, enabled: Boolean) {
+    PanelCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SectionLabel("Observatory")
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Observatory")
+                Switch(checked = grain.observatory, onCheckedChange = { vm.setObservatory(it) }, enabled = enabled)
+            }
+            Text(
+                "Chaos, drone, scale-lock, reverb and shimmer, as in the web app. While it is on it " +
+                    "steers position, pitch and width itself: Drift, Pitch and Pitch spray above have " +
+                    "no effect, and First Light's routes stand down.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val on = enabled && grain.observatory
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Drone")
+                Switch(checked = grain.drone, onCheckedChange = { vm.setDrone(it) }, enabled = on)
+            }
+            LabelledSlider("Chaos", "%.2f".format(grain.chaos), grain.chaos, { vm.setChaos(it) }, on)
+            LabelledSlider("Pitch amount", "%.2f".format(grain.pitchAmount), grain.pitchAmount, { vm.setPitchAmount(it) }, on)
+            LabelledSlider("Key", KEY_NAMES[grain.key.coerceIn(0, 11)],
+                grain.key / 11f, { vm.setKey(Math.round(it * 11f)) }, on)
+            LabelledSlider("Scale", SCALE_NAMES[grain.scale.coerceIn(0, 6)],
+                grain.scale / 6f, { vm.setScale(Math.round(it * 6f)) }, on)
+            LabelledSlider("Register", "%+d st".format(Math.round(grain.register)),
+                (grain.register + 24f) / 48f, { vm.setRegister(Math.round(it * 48f - 24f).toFloat()) }, on)
+            LabelledSlider("Detune", "%.2f st".format(grain.detune), grain.detune, { vm.setDetune(it) }, on)
+            LabelledSlider("Scan", "%+.2f×".format(grain.scan), (grain.scan + 1f) / 2f, { vm.setScan(it * 2f - 1f) }, on)
+            LabelledSlider("Space", "%.2f".format(grain.space), grain.space, { vm.setSpace(it) }, on)
+            LabelledSlider("Shimmer", "%.2f".format(grain.shimmer), grain.shimmer, { vm.setShimmer(it) }, on)
+            LabelledSlider("Tone", "%.2f".format(grain.tone), grain.tone, { vm.setTone(it) }, on)
+        }
+    }
+}
+
+@Composable
+private fun SoakCard(running: Boolean, elapsedSeconds: Long, xrunsAtStart: Long, meters: State<EngineMeters>) {
+    val xrunsThisRun = if (xrunsAtStart < 0) 0 else (meters.value.xruns - xrunsAtStart).toInt()
     val progress = (elapsedSeconds.toFloat() / SOAK_TARGET_SECONDS).coerceIn(0f, 1f)
     val passed = elapsedSeconds >= SOAK_TARGET_SECONDS && xrunsThisRun == 0
     val failed = xrunsThisRun > 0
 
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                passed -> MaterialTheme.colorScheme.primaryContainer
-                failed -> MaterialTheme.colorScheme.errorContainer
-                else -> MaterialTheme.colorScheme.surfaceVariant
-            }
-        )
+    PanelCard(
+        containerColor = when {
+            passed -> MaterialTheme.colorScheme.secondaryContainer
+            failed -> MaterialTheme.colorScheme.errorContainer
+            else -> Panel
+        },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("M0 acceptance — 10 minutes, zero xRuns")
+            SectionLabel("Soak test — 10 minutes, zero xRuns")
             Text(
                 when {
                     !running -> "Not running"

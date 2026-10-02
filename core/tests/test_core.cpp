@@ -134,6 +134,76 @@ int main(){
         check(ident, "same seed -> bit-identical render (determinism)");
     }
 
+    // 11. voice cap: density is soft-limited so the cloud never exceeds P_MAX_VOICES
+    {
+        c.init(48000); loadNoise(c,2.0); c.setParamNow(P_PLAYING,1);
+        c.setParamNow(P_DENSITY,200); c.setParamNow(P_GRAIN_MS,2000);
+        int worst=0; std::vector<float> b(128*2);
+        for(int i=0;i<1500;i++){ c.render(b.data(),128); if(c.activeGrains()>worst)worst=c.activeGrains(); }
+        c.setParamNow(P_MAX_VOICES,64); int worst64=0;
+        for(int i=0;i<1500;i++){ c.render(b.data(),128); if(i>800&&c.activeGrains()>worst64)worst64=c.activeGrains(); }
+        char d[64]; snprintf(d,sizeof d,"(peak %d of 256, then %d of 64)",worst,worst64);
+        check(worst<=MAX_GRAINS && worst>200 && worst64<=64 && worst64>48, "voice cap holds, cloud stays full", d);
+    }
+
+    // 12. level stays put at the voice ceiling (gain comp follows the limited density)
+    {
+        c.init(48000); loadNoise(c,2.0); c.setParamNow(P_PLAYING,1); c.setParamNow(P_GRAIN_MS,2000);
+        c.setParamNow(P_DENSITY,100); run(c,1200); auto a=run(c,1200); double under=rmsdb(a,0,a.size());
+        c.setParamNow(P_DENSITY,200); run(c,1200); auto b=run(c,1200); double over=rmsdb(b,0,b.size());
+        char d[64]; snprintf(d,sizeof d,"(100/s %.1f dB vs 200/s %.1f dB)",under,over);
+        check(fabs(over-under) < 1.5, "asking past the voice cap does not drop the level", d);
+    }
+
+    // 13. P_POSITION is live: moving it while playing moves where new grains read
+    {
+        c.init(48000); loadNoise(c,2.0); c.setParamNow(P_PLAYING,1);
+        c.setParamNow(P_DRIFT,0); c.setParamNow(P_SPRAY_MS,0); c.setParamNow(P_POSITION,0.25f); c.setSource(2,96000);
+        run(c,200); double before=c.grainAt(c.activeGrains()-1).srcPos/96000.0;
+        c.setParam(P_POSITION,0.75f); run(c,600); int n=c.activeGrains(); double after=c.grainAt(n-1).srcPos/96000.0;
+        after-=floor(after); before-=floor(before);
+        char d[64]; snprintf(d,sizeof d,"(newest grain %.2f -> %.2f)",before,after);
+        check(fabs(before-0.25)<0.2 && fabs(after-0.75)<0.2, "POSITION moves the cloud while playing", d);
+    }
+
+    // 14. anti-alias is off unless asked for, and when on it only touches sped-up grains
+    {
+        auto hf=[&](float aa,float pitch){
+            c.init(48000); loadNoise(c,2.0); c.setParamNow(P_PLAYING,1); c.setParamNow(P_ANTI_ALIAS,aa);
+            c.setParamNow(P_PITCH,pitch); c.setParamNow(P_PITCH_SPRAY,0); c.setParamNow(P_REVERSE_PROB,0);
+            run(c,200); auto a=run(c,800); double s=0; for(size_t i=2;i<a.size();i+=2){double e=a[i]-a[i-2]; s+=e*e;}
+            return 10*log10(s/(a.size()/2)+1e-20); };   // first-difference energy ~ high-frequency content
+        double off12=hf(0,12), on12=hf(1,12), off0=hf(0,0), on0=hf(1,0);
+        char d[80]; snprintf(d,sizeof d,"(+12 st: %.1f dB with filter; unity: %.2f dB)",on12-off12,on0-off0);
+        check(on12 < off12-1.0 && on0==off0, "anti-alias tames +12 st grains, leaves unity alone", d);
+    }
+
+    // 15. source capacity is the host's: a buffer longer than MAX_FRAMES plays to its end
+    {
+        const int N=MAX_FRAMES+48000; float* big=new float[N]();
+        for(int i=MAX_FRAMES;i<N;i++) big[i]=0.5f*sinf(2*M_PI*220*i/48000.0);   // audio only past the old cap
+        GrainCore* c4=new GrainCore(); c4->setBuffers(big,big,N); c4->init(48000);
+        c4->setParamNow(P_POSITION,(MAX_FRAMES+24000)/(float)N); c4->setParamNow(P_DRIFT,0); c4->setParamNow(P_SPRAY_MS,100);
+        c4->setSource(1,N); c4->setParamNow(P_PLAYING,1);
+        run(*c4,200); auto a=run(*c4,400);
+        GrainCore* c5=new GrainCore(); c5->setBuffers(big,big); c5->init(48000); c5->setSource(1,N);
+        c5->setParamNow(P_PLAYING,1); run(*c5,200); auto b=run(*c5,400);
+        check(peak(a)>0.05 && peak(b)<1e-6, "host-set capacity reaches past MAX_FRAMES; default still clamps");
+    }
+
+    // 16. long sources keep sub-sample precision when a grain wraps past the end
+    {
+        const int N=MAX_FRAMES; c.init(48000);
+        for(int i=0;i<N;i++){ float v=0.5f*sinf(2*M_PI*100.0*i/48000.0); c.srcL_[i]=v; c.srcR_[i]=v; }   // 100 Hz: whole cycles, so the wrap is seamless
+        c.setParamNow(P_POSITION,0.9999f); c.setParamNow(P_DRIFT,0); c.setParamNow(P_SPRAY_MS,0);
+        c.setParamNow(P_PITCH,0.37f); c.setParamNow(P_PITCH_SPRAY,0); c.setParamNow(P_REVERSE_PROB,0); c.setParamNow(P_SPREAD,0);
+        c.setSource(2,N); c.setParamNow(P_PLAYING,1);
+        run(c,300); auto a=run(c,600);
+        double worst=0; for(size_t i=4;i<a.size();i+=2){ double dd=fabs(a[i]-2*a[i-2]+a[i-4]); if(dd>worst)worst=dd; }
+        char d[48]; snprintf(d,sizeof d,"(max 2nd difference %.2e)",worst);
+        check(worst < 2e-3, "wrapped grains on a 60 s source stay smooth", d);
+    }
+
     printf("\n%s (%d failure%s)\n\n", fails?"FAILURES":"ALL PASS", fails, fails==1?"":"s");
     return fails?1:0;
 }

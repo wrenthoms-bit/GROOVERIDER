@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.GROOVERIDER" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark from the first frame, so there is no white flash before the app draws. -->
+    <style name="Theme.GROOVERIDER" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/abyss</item>
+    </style>
 </resources>

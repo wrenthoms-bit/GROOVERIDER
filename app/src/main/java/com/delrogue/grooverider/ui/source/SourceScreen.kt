@@ -27,6 +27,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.delrogue.grooverider.ui.HelpButton
 import com.delrogue.grooverider.ui.HelpDialog
+import androidx.compose.foundation.background
+import com.delrogue.grooverider.ui.theme.Abyss
+import com.delrogue.grooverider.ui.theme.Amber
+import com.delrogue.grooverider.ui.theme.Coral
+import com.delrogue.grooverider.ui.theme.Cyan
+import com.delrogue.grooverider.ui.theme.Dim
+import com.delrogue.grooverider.ui.theme.Ink
+import com.delrogue.grooverider.ui.theme.Mint
+import com.delrogue.grooverider.ui.theme.PanelCard
 
 @Composable
 fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel()) {
@@ -53,9 +62,15 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
 
     var showHelp by remember { mutableStateOf(false) }
 
-    Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Sources", style = MaterialTheme.typography.headlineMedium)
+    Column(
+        modifier.fillMaxSize().background(Abyss).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column {
+                Text("Sources", color = Color.White, style = MaterialTheme.typography.headlineMedium)
+                Text("The sounds the cloud is made from", color = Dim, style = MaterialTheme.typography.bodySmall)
+            }
             HelpButton(onClick = { showHelp = true })
         }
 
@@ -63,7 +78,7 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
             Button(onClick = { picker.launch(arrayOf("audio/*")) }, enabled = !busy && !recording) {
                 Text("Import audio")
             }
-            Button(
+            OutlinedButton(
                 onClick = {
                     if (recording ||
                         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -75,9 +90,9 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
                     }
                 },
                 enabled = !busy,
-                colors = if (recording) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                         else ButtonDefaults.buttonColors(),
-            ) { Text(if (recording) "Stop (${"%.0f".format(micLevel * 100)}%)" else "Record mic") }
+                colors = if (recording) ButtonDefaults.outlinedButtonColors(containerColor = Coral, contentColor = Color.White)
+                         else ButtonDefaults.outlinedButtonColors(contentColor = Ink),
+            ) { Text(if (recording) "● Stop (${"%.0f".format(micLevel * 100)}%)" else "Record mic") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         micError?.let {
@@ -86,13 +101,13 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
 
         // --- selected source: waveform + trim + transport ---
         selected?.let { sel ->
-            Card {
+            PanelCard(selected = true) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(sel.record.name, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text(sel.record.name, color = Color.White, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     Text(
                         "${sel.record.channels}ch · ${sel.record.sampleRate} Hz · " +
                             "${"%.2f".format(sel.record.durationMs / 1000f)} s",
-                        fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
+                        color = Dim, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
                     )
                     WaveformView(
                         peaks = sel.peaks,
@@ -105,25 +120,24 @@ fun SourceScreen(modifier: Modifier = Modifier, vm: SourceViewModel = viewModel(
                         Button(onClick = { vm.play() }) { Text("Play") }
                         OutlinedButton(onClick = { vm.stop() }) { Text("Stop") }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { vm.deleteSelected() }) { Text("Delete") }
+                        TextButton(onClick = { vm.deleteSelected() }) { Text("Delete", color = Coral) }
                     }
                 }
             }
         }
 
-        Text("Library", style = MaterialTheme.typography.labelLarge)
+        Text("${sources.size} SOUNDS", color = Dim, style = MaterialTheme.typography.labelMedium)
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(sources, key = { it.hash }) { s ->
                 val isSel = selected?.record?.hash == s.hash
-                Card(
-                    colors = if (isSel) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                             else CardDefaults.cardColors(),
+                PanelCard(
+                    selected = isSel,
                     modifier = Modifier.fillMaxWidth().clickable { vm.select(s) },
                 ) {
                     Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        Text(s.name, maxLines = 1, style = MaterialTheme.typography.bodyLarge)
+                        Text(s.name, maxLines = 1, color = if (isSel) Color.White else Ink, style = MaterialTheme.typography.bodyLarge)
                         Text("${"%.1f".format(s.durationMs / 1000f)} s · ${s.sampleRate} Hz · ${s.channels}ch",
-                            fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                            color = Dim, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -172,17 +186,18 @@ private fun WaveformView(
         for (i in 0 until n) {
             val h = peaks.getOrElse(i) { 0f } * mid
             val x = i * dx
-            drawLine(Color(0xFF8A8376), Offset(x, mid - h), Offset(x, mid + h), 1f)
+            val inside = x >= inFrac * size.width && x <= outFrac * size.width
+            drawLine(if (inside) Mint else Mint.copy(alpha = 0.28f), Offset(x, mid - h), Offset(x, mid + h), 1f)
         }
         // region shading
         val inX = inFrac * size.width
         val outX = outFrac * size.width
-        drawRect(Color(0x33E4A253), topLeft = Offset(inX, 0f), size = androidx.compose.ui.geometry.Size(outX - inX, size.height))
-        drawLine(Color(0xFFE4A253), Offset(inX, 0f), Offset(inX, size.height), 3f)
-        drawLine(Color(0xFFE4A253), Offset(outX, 0f), Offset(outX, size.height), 3f)
+        drawRect(Amber.copy(alpha = 0.10f), topLeft = Offset(inX, 0f), size = androidx.compose.ui.geometry.Size(outX - inX, size.height))
+        drawLine(Amber, Offset(inX, 0f), Offset(inX, size.height), 3f)
+        drawLine(Amber, Offset(outX, 0f), Offset(outX, size.height), 3f)
         // playhead
         val px = playFrac.coerceIn(0f, 1f) * size.width
-        drawLine(Color(0xFF5CC3D8), Offset(px, 0f), Offset(px, size.height), 2f)
+        drawLine(Cyan, Offset(px, 0f), Offset(px, size.height), 2f)
     }
 }
 

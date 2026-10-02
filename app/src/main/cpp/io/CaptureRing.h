@@ -60,6 +60,22 @@ public:
         return out;
     }
 
+    /// Any non-audio thread: the newest `frames` frames, mixed to mono, oldest
+    /// first. For the visuals -- it only reads, and a frame or two caught
+    /// mid-write is of no consequence to a spectrum. False if the ring is not
+    /// configured or holds less than that yet.
+    bool latestMono(float* dst, int32_t frames) const noexcept {
+        if (capacityFrames_ < frames || totalWritten_.load(std::memory_order_acquire) < frames) return false;
+        const int64_t w = writeIndex_.load(std::memory_order_acquire);
+        int64_t src = (w - frames + capacityFrames_) % capacityFrames_;
+        for (int32_t i = 0; i < frames; ++i) {
+            dst[i] = (static_cast<float>(buffer_[static_cast<size_t>(src) * 2]) +
+                      static_cast<float>(buffer_[static_cast<size_t>(src) * 2 + 1])) * (0.5f / 32767.0f);
+            if (++src == capacityFrames_) src = 0;
+        }
+        return true;
+    }
+
 private:
     static inline int16_t floatToI16(float v) noexcept {
         const float c = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);

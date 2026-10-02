@@ -32,7 +32,28 @@ enum ParamId : uint16_t {
     // --- Modulation & chaos (spec 4, M4) ---
     kChaosRate = 18,    // 0 .. 1, log-mapped to Lorenz dt
 
-    kParamCount  = 19
+    // --- Observatory (core/Observatory.h) ---
+    kChaos       = 19,  // 0 .. 1, Lorenz rate and depth together
+    kPitchAmount = 20,  // 0 .. 1, scatter range (or spray when the scale is free)
+    kKey         = 21,  // 0 .. 11, C .. B
+    kScale       = 22,  // 0=free 1=chromatic 2=major 3=minor 4=pent-major 5=pent-minor 6=octaves+fifths
+    kRegister    = 23,  // -24 .. +24 semitones
+    kDetune      = 24,  // 0 .. 1 semitones
+    kDrone       = 25,  // 0 or 1
+    kSpace       = 26,  // 0 .. 1, room .. ocean
+    kShimmer     = 27,  // 0 .. 1
+    kTone        = 28,  // 0 .. 1, 500 Hz .. 18 kHz
+    kScan        = 29,  // -1 .. +1
+    kObservatory = 30,  // 0 or 1: off = the core alone, as Seeds saved before the Observatory expect
+
+    // --- Keyboard (the Observatory's pitch centres) and transport ---
+    // A chord is sent as kNotesBegin with the number of notes (0 clears it),
+    // then one kNoteValue per note. It takes effect once the last has arrived.
+    kNotesBegin  = 31,  // 0 .. 16 notes follow
+    kNoteValue   = 32,  // semitones from middle C
+    kPlaying     = 33,  // 0 or 1: 0 stops new grains (those sounding finish, the space rings on)
+
+    kParamCount  = 34
 };
 
 } // namespace grvr
