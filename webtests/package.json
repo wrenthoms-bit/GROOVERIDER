@@ -1,0 +1,14 @@
+{
+  "name": "grooverider-webtests",
+  "private": true,
+  "type": "module",
+  "description": "Checks for the Grooverider web app (docs/index.html)",
+  "scripts": {
+    "test": "node engine.test.mjs && node browser.test.mjs",
+    "test:engine": "node engine.test.mjs",
+    "test:browser": "node browser.test.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.0.0"
+  }
+}
