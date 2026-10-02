@@ -22,4 +22,8 @@ data class EngineMeters(
     val bufferGrows: Int = 0,
     val running: Boolean = false,
     val activeVoices: Int = 0,
+    // the chaos in charge of the sound, each -1 .. 1 (the visuals lean with it)
+    val chaosX: Float = 0f,
+    val chaosY: Float = 0f,
+    val chaosZ: Float = 0f,
 )

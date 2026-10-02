@@ -52,6 +52,11 @@ public:
     /// end a single orbit takes minutes, which is the timescale a pad wants.
     static float lorenzDt(float chaosRate01) noexcept;
 
+    /// The Lorenz outputs the matrix routes from, each -1 .. 1 (0 = x, 1 = y, 2 = z).
+    float lorenzOut(int axis) const noexcept {
+        return sourceValue(static_cast<uint8_t>(axis == 0 ? kModLorenzX : (axis == 1 ? kModLorenzY : kModLorenzZ)));
+    }
+
     // Introspection for the 60-minute Lorenz stability test.
     float lorenzRawX() const noexcept { return lorenz_.x; }
     float lorenzRawY() const noexcept { return lorenz_.y; }

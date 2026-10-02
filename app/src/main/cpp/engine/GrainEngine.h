@@ -95,6 +95,10 @@ public:
     /// the cloud is restarted in the new mode.
     void setObservatory(bool on) noexcept { obsWanted_ = on; }
     bool observatory() const noexcept { return obsOn_; }
+    /// Where its chaos is, each -1 .. 1, for the visuals. Audio thread.
+    float chaosX() const noexcept { return obs_->chaosX(); }
+    float chaosY() const noexcept { return obs_->chaosY(); }
+    float chaosZ() const noexcept { return obs_->chaosZ(); }
     /// `id` is a grv::ObsParam. Position, spray, spread and width also arrive
     /// through their own setters above.
     void setObsParam(int id, float v) noexcept {

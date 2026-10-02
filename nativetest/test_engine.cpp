@@ -6,6 +6,7 @@
 #include "io/SourceBuffer.h"
 #include "io/TripleBuffer.h"
 #include "dsp/Smoother.h"
+#include "dsp/Spectrum.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -901,7 +902,34 @@ static void testOfflineObservatory() {
           "OfflineRenderer + Observatory: the export is as loud as the live engine", d);
 }
 
-// ---------------------------------------------------- 10. Adaptive voice cap (M8)
+// ---------------------------------------------------- 10. Spectrum for the visuals
+
+static void testSpectrum() {
+    // a pure tone lands in the right bin, at the level a Web Audio analyser would report
+    float samples[Spectrum::kSize], mags[Spectrum::kBins];
+    for (int i = 0; i < Spectrum::kSize; ++i) samples[i] = std::sin(2.0f * static_cast<float>(M_PI) * 3000.0f * static_cast<float>(i) / 48000.0f);
+    Spectrum::magnitudes(samples, mags);
+    int best = 0; for (int k = 1; k < Spectrum::kBins; ++k) if (mags[k] > mags[best]) best = k;
+    const float hz = static_cast<float>(best) * 48000.0f / static_cast<float>(Spectrum::kSize);
+    char d[96]; snprintf(d, sizeof d, "(peak at %.0f Hz, magnitude %.3f)", hz, mags[best]);
+    check(std::fabs(hz - 3000.0f) < 24.0f && mags[best] > 0.18f && mags[best] < 0.24f && mags[Spectrum::kBins / 2] < 1e-4f,
+          "Spectrum: a 3 kHz sine peaks in the 3 kHz bin, analyser-scaled", d);
+
+    // through the engine: read back what it just played, without touching the callback
+    Engine e;
+    oboe::AudioStream fake;
+    check(!e.spectrum(mags), "Spectrum: nothing to read before the engine starts");
+    e.start();
+    e.setParam(kToneEnabled, 1.0f); e.setParam(kToneHz, 1000.0f); e.setParam(kToneGain, 0.5f); e.setParam(kMasterGain, 1.0f);
+    std::vector<float> played; renderBlocks(e, &fake, played, 60, 192);
+    const bool ok = e.spectrum(mags);
+    best = 0; for (int k = 1; k < Spectrum::kBins; ++k) if (mags[k] > mags[best]) best = k;
+    snprintf(d, sizeof d, "(peak at %.0f Hz)", static_cast<float>(best) * 48000.0f / static_cast<float>(Spectrum::kSize));
+    check(ok && std::abs(best - 43) <= 1, "Spectrum: the engine's own output, a 1 kHz tone, read back from the capture ring", d);
+    e.stop();
+}
+
+// ---------------------------------------------------- 11. Adaptive voice cap (M8)
 
 static void testAdaptiveVoiceCap() {
     Engine e;
@@ -951,6 +979,8 @@ int main() {
     testObservatoryMode();
     testModeSwitch();
     testOfflineObservatory();
+
+    testSpectrum();
 
     printf("\n== Grooverider M8 polish checks ==\n\n");
     testAdaptiveVoiceCap();

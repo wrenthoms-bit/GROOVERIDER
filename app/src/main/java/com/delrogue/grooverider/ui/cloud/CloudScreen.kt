@@ -50,6 +50,8 @@ import com.delrogue.grooverider.render.ShareExporter
 import com.delrogue.grooverider.ui.EngineViewModel
 import com.delrogue.grooverider.ui.HelpButton
 import com.delrogue.grooverider.ui.HelpDialog
+import com.delrogue.grooverider.ui.cloud.gl.ObservatoryBackdrop
+import com.delrogue.grooverider.ui.cloud.gl.ObservatoryGlView
 import com.delrogue.grooverider.ui.source.SourceViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.pow
@@ -81,7 +83,6 @@ fun CloudScreen(
     val frozen by vm.frozen.collectAsStateWithLifecycle()
     val canGoBack by vm.canGoBackInLineage.collectAsStateWithLifecycle()
     val seedName by vm.seedName.collectAsStateWithLifecycle()
-    val cloud by vm.cloud.collectAsStateWithLifecycle()
     val captureHint by vm.captureHint.collectAsStateWithLifecycle()
     val captureReview by vm.captureReview.collectAsStateWithLifecycle()
     val rendering by vm.rendering.collectAsStateWithLifecycle()
@@ -89,6 +90,9 @@ fun CloudScreen(
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
     var showHelp by remember { mutableStateOf(false) }
+    // The Observatory visuals need OpenGL ES 3.0. Where that is missing, or
+    // turns out not to work, the original canvas cloud is drawn instead.
+    var glVisuals by remember { mutableStateOf(ObservatoryGlView.isSupported(context)) }
 
     LaunchedEffect(captureHint) {
         if (captureHint != null) {
@@ -98,7 +102,15 @@ fun CloudScreen(
     }
 
     Box(modifier.fillMaxSize().background(kBackground)) {
-        CloudCanvas(
+        if (glVisuals) {
+            ObservatoryBackdrop(vm, Modifier.fillMaxSize(), onUnavailable = { glVisuals = false })
+        }
+        // Over the Observatory this layer is see-through and draws only the
+        // playing surface (waveform, position, cursor). On its own it is the
+        // whole picture, grains included.
+        CloudLayer(
+            vm = vm,
+            overlay = glVisuals,
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
@@ -120,7 +132,6 @@ fun CloudScreen(
                         },
                     )
                 },
-            grains = cloud.grains,
             peaks = selectedSource?.peaks ?: FloatArray(0),
             position = grain.position,
             pitchSt = grain.pitchSt,
@@ -285,9 +296,35 @@ private fun CornerDial(modifier: Modifier = Modifier, content: @Composable () ->
     ) { content() }
 }
 
+/**
+ * The canvas layer. Reading the grain cloud redraws at 60 frames a second, so
+ * it is only collected here, and only when this layer is the one drawing the
+ * grains.
+ */
+@Composable
+private fun CloudLayer(
+    vm: EngineViewModel,
+    overlay: Boolean,
+    modifier: Modifier,
+    peaks: FloatArray,
+    position: Float,
+    pitchSt: Float,
+    sprayMs: Float,
+    sourceDurationMs: Long,
+    frozen: Boolean,
+) {
+    if (overlay) {
+        CloudCanvas(modifier, true, emptyList(), peaks, position, pitchSt, sprayMs, sourceDurationMs, frozen)
+    } else {
+        val cloud by vm.cloud.collectAsStateWithLifecycle()
+        CloudCanvas(modifier, false, cloud.grains, peaks, position, pitchSt, sprayMs, sourceDurationMs, frozen)
+    }
+}
+
 @Composable
 private fun CloudCanvas(
     modifier: Modifier,
+    overlay: Boolean,
     grains: List<GrainVisual>,
     peaks: FloatArray,
     position: Float,
@@ -296,7 +333,7 @@ private fun CloudCanvas(
     sourceDurationMs: Long,
     frozen: Boolean,
 ) {
-    Canvas(modifier.background(Color(0xFF0B0B0E))) {
+    Canvas(if (overlay) modifier else modifier.background(Color(0xFF0B0B0E))) {
         val w = size.width
         val h = size.height
         val waveTop = h * 0.55f
@@ -312,7 +349,7 @@ private fun CloudCanvas(
         val cursorColor = if (frozen) Color(0xFF3FA7FF) else Color(0xFFE0574D)
 
         // Faint vignette so the field has depth instead of a flat fill.
-        drawRect(
+        if (!overlay) drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xFF17171D), Color(0xFF0B0B0E)),
                 center = Offset(w * 0.5f, h * 0.42f),
@@ -320,6 +357,8 @@ private fun CloudCanvas(
             ),
             size = size,
         )
+        // Over the Observatory the waveform is a faint guide, not a wall.
+        val waveAlpha = if (overlay) 0.35f else 1f
 
         // Waveform -- bars near the cursor's column pick up its colour, so
         // the source and the touch that's reaching into it read as linked.
@@ -332,7 +371,7 @@ private fun CloudCanvas(
                 val proximity = (1f - (kotlin.math.abs(barX - cursorX) / reach).coerceIn(0f, 1f))
                 val tint = lerp(Color(0xFF3C3C44), cursorColor, proximity * 0.55f)
                 drawRect(
-                    color = tint,
+                    color = tint.copy(alpha = waveAlpha),
                     topLeft = Offset(barX, waveTop - amp / 2f),
                     size = Size(barW * 0.8f, amp),
                 )
@@ -358,7 +397,7 @@ private fun CloudCanvas(
         }
 
         // Position marker.
-        drawRect(Color(0xFFE0E0E6), topLeft = Offset(position * w - 1f, 0f),
+        drawRect(Color(0xFFE0E0E6).copy(alpha = if (overlay) 0.5f else 1f), topLeft = Offset(position * w - 1f, 0f),
             size = Size(2f, h))
 
         // Grain particles: a soft additive halo plus a bright core, on a

@@ -29,6 +29,7 @@ struct Meters {
     int32_t bufferGrows = 0;      // times we widened the buffer after an xrun
     int32_t running     = 0;
     int32_t activeVoices= 0;      // concurrent grains (spec 1.2)
+    float chaosX = 0.0f, chaosY = 0.0f, chaosZ = 0.0f;   // the chaos in charge, each -1 .. 1, for the visuals
 };
 
 /// M0 engine: opens an Oboe stream and renders a smoothed test tone.
@@ -78,6 +79,13 @@ public:
     /// [seconds] of what was actually heard, oldest-first, interleaved int16.
     std::vector<int16_t> captureSnapshot(double seconds) const { return captureRing_.snapshot(seconds); }
     int32_t captureSampleRate() const noexcept { return captureRing_.sampleRate(); }
+
+    /// Any non-audio thread, for the visuals: the magnitude spectrum of the
+    /// newest Spectrum::kSize frames of output into `magnitudes` (Spectrum::kBins
+    /// floats). False, and nothing written, if the engine is not running or is
+    /// busy being opened or closed. Only reads the capture ring -- the audio
+    /// thread is not involved.
+    bool spectrum(float* magnitudes);
 
     // --- source preview (M1). UI/IO thread builds the buffer; the audio thread
     //     picks it up through a one-deep retirement handoff (no lock, no free

@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "../dsp/Denormal.h"
+#include "../dsp/Spectrum.h"
 
 #ifdef __ANDROID__
 #include <sched.h>
@@ -371,6 +372,10 @@ oboe::DataCallbackResult Engine::onAudioReady(oboe::AudioStream* stream,
     m.bufferGrows  = bufferGrows_;
     m.running      = 1;
     m.activeVoices = grainEngine_.activeVoices();
+    const bool obs = grainEngine_.observatory();
+    m.chaosX = obs ? grainEngine_.chaosX() : modEngine_.lorenzOut(0);
+    m.chaosY = obs ? grainEngine_.chaosY() : modEngine_.lorenzOut(1);
+    m.chaosZ = obs ? grainEngine_.chaosZ() : modEngine_.lorenzOut(2);
     auto latency   = stream->calculateLatencyMillis();
     m.latencyMs    = latency ? static_cast<float>(latency.value()) : 0.0f;
     meters_.publish();
@@ -535,6 +540,19 @@ int32_t Engine::profileAndSetVoiceCap() {
     grainEngine_.setMaxVoices(cap);
     LOGI("device profile: %.1f%% CPU at 256 voices -> voice cap %d", loadFraction * 100.0, cap);
     return cap;
+}
+
+// ---------------------------------------------------------------- visuals
+
+bool Engine::spectrum(float* magnitudes) {
+    // try_lock: opening and closing the stream reallocate the capture ring
+    // under this lock, and a skipped frame of the visuals costs nothing.
+    std::unique_lock<std::mutex> lock(lifecycleLock_, std::try_to_lock);
+    if (!lock.owns_lock() || !stream_) return false;
+    float samples[Spectrum::kSize];
+    if (!captureRing_.latestMono(samples, Spectrum::kSize)) return false;
+    Spectrum::magnitudes(samples, magnitudes);
+    return true;
 }
 
 // ---------------------------------------------------------------- reporting

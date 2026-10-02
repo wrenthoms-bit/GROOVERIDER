@@ -12,7 +12,7 @@ object GrooveriderEngine {
         System.loadLibrary("grooverider")
     }
 
-    private val meterScratch = FloatArray(9)
+    private val meterScratch = FloatArray(12)
 
     // ---- lifecycle / transport -------------------------------------------
     fun create() = nativeCreate()
@@ -104,10 +104,22 @@ object GrooveriderEngine {
             xruns = meterScratch[4].toInt(), bufferFrames = meterScratch[5].toInt(),
             bufferGrows = meterScratch[6].toInt(), running = meterScratch[7] > 0.5f,
             activeVoices = meterScratch[8].toInt(),
+            chaosX = meterScratch[9], chaosY = meterScratch[10], chaosZ = meterScratch[11],
         )
     }
 
     fun configDescription(): String = nativeConfigDescription()
+
+    /** Bins [spectrum] fills: an FFT of the newest 2048 frames of output. */
+    const val SPECTRUM_BINS = 1024
+
+    /**
+     * For the visuals: linear magnitudes of the output's spectrum into [out]
+     * ([SPECTRUM_BINS] floats; a full-scale sine reads about 0.21). False, and
+     * [out] untouched, when the engine is not running. Safe from any thread;
+     * it never involves the audio thread.
+     */
+    fun spectrum(out: FloatArray): Boolean = nativeSpectrum(out)
 
     /** Adaptive voice cap (spec 8.4, M8): 256 flagship / 128 mid-tier / 64 floor. */
     fun profileAndSetVoiceCap(): Int = nativeProfileAndSetVoiceCap()
@@ -184,6 +196,7 @@ object GrooveriderEngine {
     private external fun nativeSetChaosEnabled(on: Boolean)
     private external fun nativePollMeters(out: FloatArray)
     private external fun nativePollCloud(out: FloatArray)
+    private external fun nativeSpectrum(out: FloatArray): Boolean
     private external fun nativeConfigDescription(): String
     private external fun nativeProfileAndSetVoiceCap(): Int
     private external fun nativeCaptureSnapshot(seconds: Double): ShortArray

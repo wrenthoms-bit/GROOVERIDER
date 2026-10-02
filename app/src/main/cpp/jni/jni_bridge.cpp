@@ -6,6 +6,7 @@
 #include "../engine/Engine.h"
 #include "../engine/OfflineRenderer.h"
 #include "../dsp/Resampler.h"
+#include "../dsp/Spectrum.h"
 #include "../io/SourceBuffer.h"
 #include "../io/MicRecorder.h"
 
@@ -83,16 +84,29 @@ Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeSetChaosEnabled(JNI
 JNIEXPORT void JNICALL
 Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativePollMeters(JNIEnv* env, jobject,
                                                                        jfloatArray out) {
-    if (out == nullptr || env->GetArrayLength(out) < 9) return;
+    if (out == nullptr || env->GetArrayLength(out) < 12) return;
     grvr::Meters m;
     if (auto* e = engineOrNull()) e->pollMeters(m);
-    jfloat v[9] = {
+    jfloat v[12] = {
         m.peakL, m.peakR, m.latencyMs, m.cpuLoad,
         static_cast<jfloat>(m.xruns), static_cast<jfloat>(m.bufferFrames),
         static_cast<jfloat>(m.bufferGrows), static_cast<jfloat>(m.running),
-        static_cast<jfloat>(m.activeVoices)
+        static_cast<jfloat>(m.activeVoices), m.chaosX, m.chaosY, m.chaosZ
     };
-    env->SetFloatArrayRegion(out, 0, 9, v);
+    env->SetFloatArrayRegion(out, 0, 12, v);
+}
+
+/// For the visuals: the output's magnitude spectrum (grvr::Spectrum::kBins
+/// floats) into `out`. False if there is nothing to read just now.
+JNIEXPORT jboolean JNICALL
+Java_com_delrogue_grooverider_engine_GrooveriderEngine_nativeSpectrum(JNIEnv* env, jobject,
+                                                                     jfloatArray out) {
+    auto* e = engineOrNull();
+    if (!e || out == nullptr || env->GetArrayLength(out) < grvr::Spectrum::kBins) return JNI_FALSE;
+    jfloat mags[grvr::Spectrum::kBins];
+    if (!e->spectrum(mags)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, grvr::Spectrum::kBins, mags);
+    return JNI_TRUE;
 }
 
 /// Flat layout: [0] = count, then 5 floats per grain (sourcePosNorm,
