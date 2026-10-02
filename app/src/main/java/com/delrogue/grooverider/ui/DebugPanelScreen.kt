@@ -40,6 +40,8 @@ import kotlin.math.pow
 
 private const val SOAK_TARGET_SECONDS = 600L   // M0: ten minutes, zero xRuns
 
+private const val RECENT_SEEDS_SHOWN = 10
+
 @Composable
 fun DebugPanelScreen(
     modifier: Modifier = Modifier,
@@ -297,7 +299,12 @@ fun DebugPanelScreen(
                     seedLoadError?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
-                    seeds.forEach { seed ->
+                    // Newest few only. This screen redraws ~30 times a second for
+                    // the meters and is not a lazy list, so drawing every saved
+                    // seed here (hundreds, once Mutate has been used) pins the
+                    // main thread until the system reports the app as not
+                    // responding. The Library tab is the full, lazy browser.
+                    seeds.take(RECENT_SEEDS_SHOWN).forEach { seed ->
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -309,6 +316,13 @@ fun DebugPanelScreen(
                                 OutlinedButton(onClick = { vm.deleteSeed(seed) }) { Text("Delete") }
                             }
                         }
+                    }
+                    if (seeds.size > RECENT_SEEDS_SHOWN) {
+                        Text(
+                            "Showing the newest $RECENT_SEEDS_SHOWN. The Library tab has all ${seeds.size}.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

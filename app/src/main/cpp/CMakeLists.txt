@@ -27,6 +27,12 @@ target_compile_options(grooverider PRIVATE
         # Never enable -ffast-math here: it reassociates float ops, which
         # breaks the bit-identical guarantee the Seed system rests on (spec 3.1).
         -ffp-contract=off
+        # Optimise in every build type, debug included. Android Studio's Run
+        # button installs the debug build, and unoptimised DSP is ~40x slower:
+        # on the realme the voice-cap benchmark read 111% of a core, which
+        # means dropouts whatever the engine does. -O2 does not reorder float
+        # maths, so renders stay bit-identical.
+        -O2
 )
 
 target_link_libraries(grooverider PRIVATE
