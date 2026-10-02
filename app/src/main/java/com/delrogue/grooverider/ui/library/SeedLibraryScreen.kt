@@ -1,6 +1,9 @@
 package com.delrogue.grooverider.ui.library
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.material3.TextButton
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,6 +76,13 @@ fun SeedLibraryScreen(
     val context = LocalContext.current
     var pickingSourceFor by remember { mutableStateOf<Seed?>(null) }
     var showHelp by remember { mutableStateOf(false) }
+    val importNote by vm.importNote.collectAsStateWithLifecycle()
+    val seedPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
+            vm.importSeedText(text ?: "") { seed -> vm.select(seed); engineVm.loadSeed(seed) }
+        }
+    }
 
     // Selecting a seed anywhere in the library also loads + plays it --
     // with hundreds of seeds saved, browsing has to double as auditioning.
@@ -86,9 +96,16 @@ fun SeedLibraryScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer4dp()
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("${seeds.size} seeds", color = Color(0xFF9AA0A6), style = MaterialTheme.typography.bodySmall)
-            HelpButton(onClick = { showHelp = true })
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${seeds.size} seeds", color = Color(0xFF9AA0A6), style = MaterialTheme.typography.bodySmall)
+                HelpButton(onClick = { showHelp = true })
+            }
+            // a .grvr file from this app or from the web app
+            TextButton(onClick = { seedPicker.launch(arrayOf("*/*")) }) { Text("Import seed") }
+        }
+        importNote?.let {
+            Text(it, color = Color(0xFF9AA0A6), style = MaterialTheme.typography.bodySmall)
         }
         seedLoadError?.let {
             Text(it, color = Color(0xFFE0574D), style = MaterialTheme.typography.bodySmall)

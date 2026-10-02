@@ -46,6 +46,13 @@ std::vector<float> renderWithObservatory(const SourceBuffer& source, const Rende
     grains.configure(static_cast<float>(dstRate));
     grains.setSource(&rateSource);
 
+    // Set up exactly as the web's own export sets up (docs/index.html,
+    // renderOffline): Observatory from the first sample, every param in place
+    // rather than gliding in. With the same source audio at the same rate, the
+    // two then render the same samples.
+    grains.setMasterSeed(req.masterSeed);
+    grains.startInObservatory();
+
     ModEngine mod;
     mod.configure(req.masterSeed);
     applyBaseParams(grains, mod, req);
@@ -57,8 +64,8 @@ std::vector<float> renderWithObservatory(const SourceBuffer& source, const Rende
     grains.setObsParam(grv::O_SHIMMER, req.shimmer);   grains.setObsParam(grv::O_TONE, req.tone);
     grains.setObsParam(grv::O_SCAN, req.scan);
     grains.setNotes(req.notes, req.noteCount);
-    mod.tick(grains);                 // hands position, spray, spread and width over before the mode starts
-    grains.setObservatory(true);
+    mod.tick(grains);                 // pushes every base value: grain params to the core, the rest to the Observatory
+    grains.snapParams();
 
     // Same 1 kHz control rate as the live engine.
     const int32_t controlPeriod = std::max(1, static_cast<int32_t>(static_cast<float>(dstRate) / 1000.0f));

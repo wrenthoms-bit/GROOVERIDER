@@ -7,6 +7,8 @@ import com.delrogue.grooverider.seed.MutableParam
 import com.delrogue.grooverider.seed.Seed
 import com.delrogue.grooverider.seed.SeedFileIO
 import com.delrogue.grooverider.seed.SeedRepository
+import com.delrogue.grooverider.source.SourceRepository
+import com.delrogue.grooverider.seed.SeedShareFormat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +20,7 @@ import java.io.File
 
 class SeedLibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = SeedRepository(app)
+    private val sources = SourceRepository(app)
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
@@ -90,12 +93,45 @@ class SeedLibraryViewModel(app: Application) : AndroidViewModel(app) {
     /** Writes to app-private storage and returns the file, ready for [ShareExporter]. */
     fun exportForSharing(seed: Seed, exportsDir: File): File {
         exportsDir.mkdirs()
-        val file = File(exportsDir, "${seed.name.replace(" ", "_")}.grvr")
-        SeedFileIO.exportToFile(seed, file)
+        val file = File(exportsDir, "GR_${seed.name.replace(Regex("[^A-Za-z0-9]+"), "")}.grvr")
+        val sourceName = sources.list().firstOrNull { it.hash == seed.sourceHash }?.name ?: ""
+        SeedFileIO.exportToFile(seed, sourceName, file)
         return file
     }
 
-    fun importFromFile(file: File) {
-        viewModelScope.launch { SeedFileIO.importFromFile(file)?.let { repo.importSeed(it) } }
+    private val _importNote = MutableStateFlow<String?>(null)
+    /** What the last import did, for the screen to show. */
+    val importNote: StateFlow<String?> = _importNote.asStateFlow()
+    fun dismissImportNote() { _importNote.value = null }
+
+    /**
+     * Imports a `.grvr` file, from this app or the web app. The seed goes on
+     * the source it was made on if that is here (by content, then by name);
+     * otherwise on the sound that is playing now.
+     */
+    fun importSeedText(json: String, onImported: (Seed) -> Unit) {
+        viewModelScope.launch {
+            var placedOn = ""
+            var substituted = false
+            val seed = repo.importSeedFile(json) { name, hash ->
+                val all = sources.list()
+                val match = all.firstOrNull { hash.isNotEmpty() && it.hash == hash }
+                    ?: all.firstOrNull { name.isNotEmpty() && it.name.equals(name, ignoreCase = true) }
+                val chosen = match ?: all.firstOrNull { it.hash == SourceRepository.engineSourceHash.value }
+                    ?: return@importSeedFile null
+                substituted = match == null
+                placedOn = chosen.name
+                val peaks = sources.peaks(chosen.hash)
+                chosen.hash to ByteArray(256) { i -> (peaks.getOrElse(i * peaks.size / 256) { 0f }.coerceIn(0f, 1f) * 255f).toInt().toByte() }
+            }
+            _importNote.value = when {
+                seed == null && SeedShareFormat.decode(json) != null ->
+                    "That seed's sound is not on this phone. Load a sound on the Sources tab first, then import again."
+                seed == null -> "That file is not a Grooverider seed."
+                substituted -> "Imported \"${seed.name}\" onto \"$placedOn\" -- the sound it was made on is not on this phone."
+                else -> "Imported \"${seed.name}\"."
+            }
+            seed?.let(onImported)
+        }
     }
 }

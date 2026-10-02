@@ -25,7 +25,7 @@ console.log('\n== ObservatoryEngine checks (Node) ==\n');
 let fails=0; const ck=(ok,n,d='')=>{ console.log(`${n.padEnd(58)} ${ok?'PASS':'**FAIL**'} ${d}`); if(!ok)fails++; };
 
 const SRO = { playing:1, density:60, grainMs:2000, timingJitter:0.5, sizeJitter:0.35, sprayMs:900, reverse:0.3, window:0, spread:0.868, width:1.4, gain:0.8,
-  position:0.42, scan:0, chaos:0.14, pitch:0.30, transpose:-9, detune:0.06, scale:3, drone:1, space:0.86, shimmer:0.42, tone:0.52 };
+  position:0.42, scan:0, chaos:0.14, pitch:0.30, key:3, register:-12, detune:0.06, scale:3, drone:1, space:0.86, shimmer:0.42, tone:0.52 };
 
 // 1. SRO: 60 s, stable, sane level
 { const e=mk(), d=demo(); e.setSeed(0x05700A11,0x0051A9D0); e.setState(SRO,true); e.setSource(d.l,d.r,d.N,2,SRO.position);
@@ -51,7 +51,7 @@ const SRO = { playing:1, density:60, grainMs:2000, timingJitter:0.5, sizeJitter:
 { const e=mk(), d=demo(); e.setState({...SRO, chaos:1, space:1, shimmer:1, tone:1, pitch:1, gain:1.5, density:128},true); e.setSource(d.l,d.r,d.N,2,0.5);
   const o=run(e,90); ck(!bad(o.L)&&peak(o.L)<=1.0,'max space+shimmer+chaos 90s: bounded', `peak ${peak(o.L).toFixed(3)} rms@88s ${db(rms(o.L,86*sr,88*sr)).toFixed(1)} dB`); }
 // 3. shimmer adds octave-up energy; reverb adds tail
-{ const meas=(sh,space)=>{ const e=mk(), d=sine(220); e.setState({...SRO, drone:0, chaos:0, pitch:0, transpose:0, scale:0, detune:0, reverse:0, shimmer:sh, space, tone:1, sprayMs:0, grainMs:400, density:40},true);
+{ const meas=(sh,space)=>{ const e=mk(), d=sine(220); e.setState({...SRO, drone:0, chaos:0, pitch:0, key:0, register:0, scale:0, detune:0, reverse:0, shimmer:sh, space, tone:1, sprayMs:0, grainMs:400, density:40},true);
     e.setSource(d.l,d.r,d.N,2,0.5); const o=run(e,12); return {f:goertzel(o.L,220,8*sr,12*sr), o1:goertzel(o.L,440,8*sr,12*sr), o2:goertzel(o.L,880,8*sr,12*sr)}; };
   const off=meas(0,0.7), on=meas(0.8,0.7);
   ck(db(on.o1)-db(off.o1)>15,'shimmer: +12 energy appears', `440Hz off ${db(off.o1).toFixed(1)} dB -> on ${db(on.o1).toFixed(1)} dB; 880Hz ${db(off.o2).toFixed(1)} -> ${db(on.o2).toFixed(1)}`);
@@ -60,7 +60,7 @@ const SRO = { playing:1, density:60, grainMs:2000, timingJitter:0.5, sizeJitter:
   ck(dry<-100&&wet>-45,'reverb: space=0 is dry, space=.8 rings', `2-3 s after stop: dry ${dry.toFixed(0)} dB, wet ${wet.toFixed(1)} dB`); }
 // 4. scale lock: all grain pitches on the scale
 { const sets=[null,[0,1,2,3,4,5,6,7,8,9,10,11],[0,2,4,5,7,9,11],[0,2,3,5,7,8,10],[0,2,4,7,9],[0,3,5,7,10],[0,7]];
-  for(const sc of [2,3,5,6]){ const e=mk(), d=demo(); e.setState({...SRO, scale:sc, transpose:3, detune:0, pitch:0.8, chaos:0.6, grainMs:300, density:80},true); e.setSource(d.l,d.r,d.N,2,0.5);
+  for(const sc of [2,3,5,6]){ const e=mk(), d=demo(); e.setState({...SRO, scale:sc, key:3, register:0, detune:0, pitch:0.8, chaos:0.6, grainMs:300, density:80},true); e.setSource(d.l,d.r,d.N,2,0.5);
     const seen=new Set(); let off=0,tot=0;
     run(e,10,(i,en)=>{ if(i%20===0){ const c=en.cloud(); for(let k=0;k<c.count;k++){ const st=12*Math.log2(Math.abs(c.data[k*5+1])); const n=Math.round(st); tot++; if(Math.abs(st-n)>0.02||!sets[sc].includes((((n-3)%12)+12)%12)) off++; else seen.add(n); } } });
     ck(off===0&&seen.size>=3,`scale-lock scale#${sc}: every grain in key`, `${tot} grains sampled, ${seen.size} distinct notes, ${off} off-scale`); }
@@ -84,7 +84,7 @@ const SRO = { playing:1, density:60, grainMs:2000, timingJitter:0.5, sizeJitter:
 { const e=mk(), d=demo(); e.setState({...SRO, scale:0, pitch:0, detune:0, register:0, key:0, reverse:0, grainMs:300, density:80},true); e.setSource(d.l,d.r,d.N,2,0.5);
   e.setNotes([0,7,-12]); const seen=new Set(); run(e,2); run(e,6,(i,en)=>{ if(i%20===0){ const c=en.cloud(); for(let k=0;k<c.count;k++) seen.add(Math.round(1200*Math.log2(Math.abs(c.data[k*5+1])))/100); } });
   ck([...seen].sort((a,b)=>a-b).join(',')==='-12,0,7','keys (free): grains spread over exactly the held notes', [...seen].join(' '));
-  const e2=mk(); e2.setState({...SRO, scale:3, key:3, register:-12, transpose:-9, pitch:0.5, detune:0, grainMs:300, density:80},true); e2.setSource(d.l,d.r,d.N,2,0.5);
+  const e2=mk(); e2.setState({...SRO, scale:3, key:3, register:-12, pitch:0.5, detune:0, grainMs:300, density:80},true); e2.setSource(d.l,d.r,d.N,2,0.5);
   e2.setNotes([3,6,10,1]); let off=0,tot=0,lo=99,hi=-99; run(e2,2); run(e2,8,(i,en)=>{ if(i%20===0){ const c=en.cloud(); for(let k=0;k<c.count;k++){ const st=12*Math.log2(Math.abs(c.data[k*5+1])), n=Math.round(st); tot++; lo=Math.min(lo,n); hi=Math.max(hi,n); if(Math.abs(st-n)>0.02||![0,2,3,5,7,8,10].includes((((n-3)%12)+12)%12)) off++; } } });
   ck(off===0&&tot>500,'keys + scale-lock: every grain in E-flat minor (incl. an out-of-key note)', `${tot} grains, ${off} off-scale, range ${lo}..${hi} st`);
   e2.setNotes([]); const s2=new Set(); run(e2,3); run(e2,3,(i,en)=>{ if(i%20===0){ const c=en.cloud(); for(let k=0;k<c.count;k++) s2.add(Math.round(12*Math.log2(Math.abs(c.data[k*5+1])))); } });

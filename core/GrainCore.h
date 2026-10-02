@@ -108,6 +108,9 @@ public:
     void setSeed(uint64_t s){ seed_ = s; }
     void setParam(int id, float v){ if(id>=0&&id<P_COUNT) smTarget_[id]=v; }
     void setParamNow(int id, float v){ if(id>=0&&id<P_COUNT){smTarget_[id]=v; sm_[id]=v;} }
+    // every param jumps to where it is heading: what a host that sets its
+    // params with setParam needs before a render that must not start mid-glide
+    void snapParams(){ for (int i=0;i<P_COUNT;i++) sm_[i]=smTarget_[i]; }
 
     // -------- the entire hot path --------
     void render(float* out, int nframes){

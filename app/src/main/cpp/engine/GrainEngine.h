@@ -94,6 +94,21 @@ public:
     /// Takes effect over a 10 ms fade down and back up, at the bottom of which
     /// the cloud is restarted in the new mode.
     void setObservatory(bool on) noexcept { obsWanted_ = on; }
+    /// For a render that begins in Observatory mode: no fade, nothing played
+    /// first. Call straight after configure(), before any params are set, so
+    /// they go where the web host sends them and the first sample is the one
+    /// the web's own render would produce.
+    void startInObservatory() noexcept {
+        obsWanted_ = true; obsOn_ = true;
+        obs_->init(sampleRate_);
+        for (int i = 0; i < grv::O_COUNT; ++i) obs_->setParam(i, obsParams_[i]);
+        obs_->setNotes(notes_, noteCount_);
+        obsSeed_ = masterSeed_.load(std::memory_order_relaxed);
+        obs_->setSeed(obsSeed_);
+        boundGen_ = -1;      // the first block binds the source and starts the cloud in this mode
+    }
+    /// Every core param jumps to its target instead of gliding there.
+    void snapParams() noexcept { core_.snapParams(); }
     bool observatory() const noexcept { return obsOn_; }
     /// Where its chaos is, each -1 .. 1, for the visuals. Audio thread.
     float chaosX() const noexcept { return obs_->chaosX(); }

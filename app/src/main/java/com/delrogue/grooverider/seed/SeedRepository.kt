@@ -93,9 +93,8 @@ class SeedRepository(context: Context) {
         child
     }
 
-    suspend fun importSeedFile(json: String): Seed? = withContext(Dispatchers.IO) {
-        SeedFileIO.import(json)?.also { dao.upsert(it) }
-    }
+    suspend fun importSeedFile(json: String, resolveSource: (name: String, hash: String) -> Pair<String, ByteArray>?): Seed? =
+        withContext(Dispatchers.IO) { SeedFileIO.import(json, resolveSource)?.also { dao.upsert(it) } }
 
     /** Pushes a Seed's masterSeed + params into the live engine; returns the unpacked params. */
     fun apply(seed: Seed): GrainState {

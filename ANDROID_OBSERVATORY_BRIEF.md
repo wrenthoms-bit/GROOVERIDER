@@ -34,6 +34,8 @@ that's resolved.
 *Update, 2 Oct 2026:* resolved on `feat/android-observatory`. After the Phase 0 audit Wren chose
 option (a): `GrainScheduler` and `VoicePool` are gone and Android now runs `core/GrainCore.h`
 through `engine/GrainEngine.h`. Wherever a later phase says "the Android engine", that is what it means.
+Phases 1 to 5 are done on the same branch: `core/Observatory.h` runs in both apps (the JavaScript
+`ObservatoryEngine` is now a thin wrapper over the WASM), and both read and write the same `.grvr` seed file.
 
 ## Working rules
 

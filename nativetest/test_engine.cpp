@@ -903,6 +903,50 @@ static void testOfflineObservatory() {
           "OfflineRenderer + Observatory: the export is as loud as the live engine", d);
 }
 
+static void testExportMatchesReferenceDrive() {
+    // "One brain": the Android export must be the very samples the web's export
+    // gets from the same engine. Drive GrainCore + Observatory by hand the way
+    // docs/index.html does -- init, seed, params set outright, source -- and
+    // compare with OfflineRenderer over the body of the render.
+    constexpr int32_t rate = 48000;
+    SourceBuffer chord = makeChordSource(rate * 6, rate);
+    RenderRequest req;
+    req.masterSeed = 0x0051A9D005700A11ULL;
+    req.density = 60; req.grainSizeMs = 2000; req.timingJitter = 0.5f; req.sizeJitter = 0.35f; req.reverseProb = 0.3f;
+    req.position = 0.42f; req.sprayMs = 900; req.spread = 0.868f; req.outputWidth = 1.4f; req.outputGain = 0.8f;
+    req.windowType = kWindowTukey; req.chaosEnabled = false; req.observatory = true;
+    req.chaos = 0.14f; req.pitchAmount = 0.30f; req.key = 3; req.scale = 3; req.registerSt = -12; req.detune = 0.06f;
+    req.drone = 1; req.space = 0.86f; req.shimmer = 0.42f; req.tone = 0.52f; req.scan = 0;
+    req.durationSeconds = 4.0;
+    const auto android = OfflineRenderer::render(chord, req, rate);
+
+    std::vector<float> pcm = chord.channel(0);
+    auto core = std::make_unique<grv::GrainCore>();
+    auto obs = std::make_unique<grv::Observatory>();
+    core->setBuffers(pcm.data(), pcm.data(), static_cast<int>(pcm.size()));
+    core->init(static_cast<float>(rate)); obs->init(static_cast<float>(rate));
+    core->setSeed(req.masterSeed); obs->setSeed(req.masterSeed);
+    core->setParamNow(grv::P_ANTI_ALIAS, 1.0f);
+    core->setParamNow(grv::P_DENSITY, 60); core->setParamNow(grv::P_TIMING_JITTER, 0.5f);
+    core->setParamNow(grv::P_GRAIN_MS, 2000); core->setParamNow(grv::P_SIZE_JITTER, 0.35f);
+    core->setParamNow(grv::P_REVERSE_PROB, 0.3f); core->setParamNow(grv::P_WINDOW, 2.0f);   // the core's id for Tukey
+    core->setParamNow(grv::P_OUT_GAIN, 0.8f); core->setParamNow(grv::P_PLAYING, 1.0f);
+    const float o[grv::O_COUNT] = { 0.42f, 0, 900, 0.868f, 1.4f, 0.14f, 0.30f, 3, 3, -12, 0.06f, 1, 0.86f, 0.42f, 0.52f };
+    for (int i = 0; i < grv::O_COUNT; ++i) obs->setParam(i, o[i]);
+    core->setParamNow(grv::P_POSITION, 0.42f);
+    core->setSource(1, static_cast<int>(pcm.size()));
+    obs->sourceChanged(0.42f);
+    const int frames = rate * 7;                        // the export's 3 s pre-roll, then its 4 s body
+    std::vector<float> reference(static_cast<size_t>(frames) * 2);
+    for (int done = 0; done < frames; done += 128) obs->render(*core, reference.data() + static_cast<size_t>(done) * 2, std::min(128, frames - done));
+
+    // skip the export's 20 ms fade-in; compare the rest of the body
+    const size_t from = static_cast<size_t>(rate / 10) * 2, count = static_cast<size_t>(rate * 4) * 2 - from;
+    const bool identical = android.size() >= from + count && rmsOf(android) > 0.01f &&
+        std::memcmp(android.data() + from, reference.data() + static_cast<size_t>(rate * 3) * 2 + from, count * sizeof(float)) == 0;
+    check(identical, "Export: Android's render is bit-identical to the engine driven the web's way");
+}
+
 static void testKeyboardNotes() {
     // The whole path the app uses: params through the ring into a running Engine.
     Engine e;
@@ -1029,6 +1073,7 @@ int main() {
     testObservatoryMode();
     testModeSwitch();
     testOfflineObservatory();
+    testExportMatchesReferenceDrive();
     testKeyboardNotes();
 
     testSpectrum();

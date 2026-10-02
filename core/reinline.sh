@@ -4,11 +4,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ./build-wasm.sh
-B64=$(base64 -w0 grooverider.wasm 2>/dev/null || base64 grooverider.wasm | tr -d '\n')
-python3 - "$B64" << 'PY'
-import sys, re
-b64=sys.argv[1]
-p="../docs/index.html"; s=open(p).read()
-s=re.sub(r'(<script id="wasmb64"[^>]*>).*?(</script>)', r'\1'+b64+r'\2', s, flags=re.S)
-open(p,'w').write(s); print("re-inlined wasm into docs/index.html")
+python3 - << 'PY'
+import base64, re
+b64 = base64.b64encode(open("grooverider.wasm", "rb").read()).decode("ascii")   # the same on macOS and Linux
+p = "../docs/index.html"; s = open(p).read()
+s, n = re.subn(r'(<script id="wasmb64"[^>]*>).*?(</script>)', lambda m: m.group(1) + b64 + m.group(2), s, flags=re.S)
+if n != 1: raise SystemExit("could not find the wasmb64 script tag in docs/index.html")
+open(p, "w").write(s); print("re-inlined wasm into docs/index.html (%d base64 characters)" % len(b64))
 PY

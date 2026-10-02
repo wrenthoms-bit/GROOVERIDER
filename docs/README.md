@@ -17,7 +17,7 @@ Live at **https://grooverider.netlify.app** and `https://wrenthoms-bit.github.io
    - **TEXTURE** long smooth grains to short dense ones. **DRIFT** how far and fast the sound wanders on its own. **SPACE** reverb, room to ocean. **PITCH** how far grains scatter in pitch.
    - **DRONE** holds one spot and lets it evolve. **KEY** and **SCALE** keep it in tune (key assumes the source is in C).
    - **Detail** opens the fine controls: shimmer, tone, register, scan and more.
-4. The menu under the title switches **presets**; "Standing Room Only" is the default. **Re-roll** gives a new variation with the same settings.
+4. The menu under the title switches **presets**; "Standing Room Only" is the default. **Re-roll** gives a new variation with the same settings. **Save** and **Load** beside it keep a sound as a seed file (`.grvr`); the phone app reads and writes the same files.
 5. **Render WAV** exports 8 seconds plus the reverb tail as a 32-bit float file.
 
 **? Help** in the top bar has all of this in the page, plus what to check if there is no sound (on iPhone and iPad, the silent switch mutes browser audio).
@@ -25,7 +25,7 @@ Live at **https://grooverider.netlify.app** and `https://wrenthoms-bit.github.io
 ## How it's built
 `index.html` is self-contained for the engine: the wasm is embedded as base64. To rebuild after changing the core, run `../core/reinline.sh`.
 
-Around the core sits a web layer, the `ObservatoryEngine` class in `index.html`: Lorenz chaos modulation, the playhead servo and drone latch, scale-lock, and the space (reverb, shimmer, tone). The same class runs live in an AudioWorklet and offline for WAV export, so the export matches what you hear. It is also the reference the Android port is matched against (`../ANDROID_OBSERVATORY_BRIEF.md`), so a change to how it sounds needs passing on.
+All of the sound is that core: the grains (`GrainCore.h`) and, around them, the Observatory (`Observatory.h`) — Lorenz chaos modulation, the playhead servo and drone latch, scale-lock, and the space (reverb, shimmer, tone). The `ObservatoryEngine` class in `index.html` only carries settings in and audio out. The same class runs live in an AudioWorklet and offline for WAV export, so the export matches what you hear. The Android app runs the very same C++, so a change to how the core sounds changes both apps at once.
 
 Visuals are WebGL (caustic water, motes, trails, bloom) with a Canvas2D fallback.
 
