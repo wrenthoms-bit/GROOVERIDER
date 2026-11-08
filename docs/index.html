@@ -398,7 +398,7 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
     </div>
     <div class="rollwrap"><canvas id="humRoll"></canvas><div class="rollempty" id="humEmpty">Record or import a hummed line — or drop an audio file here.<br>Headphones help if the click is on.</div></div>
     <div class="humctl">
-      <div><div class="lbl">Tempo <span class="inline"><input type="number" id="humBpm" min="40" max="240" step="0.1" value="120"><button id="humHalf" class="mini" title="Half tempo">½</button><button id="humDouble" class="mini" title="Double tempo">×2</button></span></div><small id="humBpmNote">Set this to your project’s tempo.</small></div>
+      <div><div class="lbl">Tempo <span class="inline"><input type="number" id="humBpm" min="40" max="240" step="0.1" value="120"><button id="humHalf" class="mini" title="Half tempo">½</button><button id="humDouble" class="mini" title="Double tempo">×2</button></span></div><small id="humBpmNote">The tempo you hum at: detected from your take, or the click’s. Logic places notes by beat, so they fit a project at any tempo.</small></div>
       <div><label for="humGrid">Quantise<select id="humGrid" style="width:auto"><option value="0">Off</option><option value="4">1/4</option><option value="8">1/8</option><option value="16" selected>1/16</option><option value="32">1/32</option></select></label>
         <label for="humStrength">Strength <span class="val" id="humStrengthV">100%</span></label><input type="range" id="humStrength" min="0" max="1" step="0.05" value="1"></div>
       <div><label for="humKey">Key<select id="humKey" style="width:auto"></select></label>
@@ -413,7 +413,7 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
       <label class="humnote"><input type="checkbox" id="humWithSrc"> with my audio</label>
       <span class="humnote" id="humInfo"></span>
       <span class="sp"></span>
-      <a id="humDrag" class="dragchip" draggable="true" aria-disabled="true" title="Drag into Logic’s tracks area (Chrome or Edge), or click to download">⇣ Drag to DAW</a>
+      <a id="humDrag" class="dragchip" draggable="true" aria-disabled="true" title="Hold and drag onto a track in Logic">⇣ Drag to DAW</a>
       <button id="humSave" class="primary" disabled>Download .mid</button>
     </div>
     <div id="humStatus" role="status" aria-live="polite"></div>
@@ -1772,7 +1772,11 @@ $('humDrag').addEventListener('dragstart', e=>{
   e.dataTransfer.setData('DownloadURL', 'audio/midi:' + HUM.file + ':' + HUM.url);   // Chrome/Edge: dropping writes the file
 });
 $('humDrag').addEventListener('dragend', ()=>{ HUM.dragging = false; });
-$('humDrag').addEventListener('click', e=>{ e.preventDefault(); humSave(); });
+// Clicking the chip explains it rather than downloading, so the two buttons do different jobs.
+$('humDrag').addEventListener('click', e=>{ e.preventDefault();
+  if (HUM.url) humStatus('Hold this chip and drag it onto a track in Logic (or onto the desktop). To save a copy instead, use Download .mid.'); });
+// Dragging a file out of the page only works in desktop Chrome and Edge; elsewhere Download .mid is the way.
+if (!/Chrome\/|Edg\//.test(navigator.userAgent) || /Mobile|Android/.test(navigator.userAgent) || IS_IOS) $('humDrag').hidden = true;
 window.addEventListener('resize', ()=>{ if (humOpen()) drawRoll(); });
 
 // ================= visuals: the Observatory =================

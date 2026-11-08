@@ -331,6 +331,10 @@ try {
     const low = await page.evaluate(() => HUM.out.notes.map(n => n.pitch));
     R('octave −1 shifts every note down 12', JSON.stringify(low) === JSON.stringify(HUM_NOTES.map(p => p - 12)));
     R('drag chip carries the file for Chrome to write', await page.$eval('#humDrag', e => e.getAttribute('aria-disabled') === 'false' && e.href.startsWith('data:audio/midi;base64,') && e.download.endsWith('.mid')));
+    const before = fs.readdirSync(TMP).filter(f => f.endsWith('.mid')).length;
+    await page.click('#humDrag'); await sleep(800);
+    R('clicking the drag chip explains it, no download', /drag it onto a track/.test(await text(page, '#humStatus'))
+      && fs.readdirSync(TMP).filter(f => f.endsWith('.mid')).length === before);
     await page.click('#humPlay'); await sleep(500);
     R('Preview plays and stops', await text(page, '#humPlay') === '■ Stop');
     await page.click('#humPlay'); R('Preview stops on demand', await text(page, '#humPlay') === '▶ Preview');
@@ -343,6 +347,13 @@ try {
       && await page.evaluate(() => !!HUM.countIn && HUM.countIn.start > 0.9) && await text(page, '#humRec') === '● Record');
     await page.keyboard.press('Escape'); await sleep(300);
     R('Esc closes Hum → MIDI', await page.$eval('#hum', e => !e.classList.contains('open')));
+    await page.close();
+  }
+
+  section('hum → MIDI on iPhone');
+  {
+    const page = await openPage({ device:'iPhone 13', fakeMidi:false });
+    R('no drag chip where files cannot be dragged out', await page.$eval('#humDrag', e => e.hidden) && await page.$eval('#humSave', e => !e.hidden));
     await page.close();
   }
 
