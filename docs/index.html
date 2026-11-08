@@ -1494,7 +1494,7 @@ function setHum(open){
   const h = $('hum'); if (open === h.classList.contains('open')) return;
   h.classList.toggle('open', open);
   if (open){
-    humReturn = document.activeElement; openGate();
+    humReturn = document.activeElement;              // the start screen stays behind the panel until Enter is clicked
     if (playing){ setPlaying(false); humStatus('Paused the Observatory so it stays out of the mic.'); }
     $('humUseSrc').disabled = !curSource; $('humClose').focus(); requestAnimationFrame(drawRoll);
   } else {

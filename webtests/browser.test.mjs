@@ -261,6 +261,9 @@ try {
   {
     const page = await openPage();
     const cdp = await page.createCDPSession(); await cdp.send('Browser.setDownloadBehavior', { behavior:'allow', downloadPath:TMP });
+    // opened before Enter: closing it leaves the start screen, so the instrument still starts properly
+    await page.click('#humBtn'); await sleep(300); await page.click('#humClose'); await sleep(300);
+    R('Hum → MIDI before Enter leaves the start screen', await page.$eval('#gate', e => !e.classList.contains('gone')));
     await page.click('#enter'); await sleep(1500);
     await page.click('#humBtn'); await sleep(400);
     const st = await stats(page);
