@@ -4,8 +4,9 @@
   "type": "module",
   "description": "Checks for the Grooverider web app (docs/index.html)",
   "scripts": {
-    "test": "node engine.test.mjs && node browser.test.mjs",
+    "test": "node engine.test.mjs && node a2m.test.mjs && node browser.test.mjs",
     "test:engine": "node engine.test.mjs",
+    "test:a2m": "node a2m.test.mjs",
     "test:browser": "node browser.test.mjs"
   },
   "devDependencies": {

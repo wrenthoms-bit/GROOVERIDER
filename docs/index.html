@@ -95,6 +95,27 @@ select.pill:hover{border-color:var(--cyan)}
 .helpgrid li b{color:var(--tx); font-weight:700}
 .helpgrid li.flag{color:#F3DDB9; border-left:2px solid var(--amber); padding-left:9px}
 .helpgrid kbd{font:10px var(--mono); color:var(--cyan); border:1px solid var(--line2); border-radius:4px; padding:0 4px}
+/* ---- hum → MIDI (reuses the help overlay) ---- */
+.humbox{max-width:980px; display:flex; flex-direction:column; gap:14px}
+.humbox .helphead{margin-bottom:0}
+.humlede{font-size:12.5px; line-height:1.5; color:var(--tx2); margin-top:-6px}
+.humrow{display:flex; flex-wrap:wrap; align-items:center; gap:8px}
+.humrow .sp{flex:1}
+.humnote{font:10px var(--mono); letter-spacing:.06em; color:var(--tx2)}
+.humnote b{color:var(--amber); font-weight:400}
+.rollwrap{position:relative; flex-shrink:0; height:clamp(170px,30vh,280px); border:1px solid var(--line); border-radius:10px; overflow:hidden; background:rgba(2,6,7,.7)}
+.rollwrap canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+.rollempty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; text-align:center; font:11px/1.6 var(--mono); color:var(--tx3); letter-spacing:.04em}
+.humctl{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px 22px}
+.humctl label,.humctl .lbl{display:flex; align-items:center; justify-content:space-between; gap:8px; font:9px var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--tx2)}
+.humctl .val{font:10px var(--mono); color:var(--amber); letter-spacing:.04em; text-transform:none}
+.humctl input[type=number]{width:64px; font:12px var(--mono); color:var(--tx); background:var(--glass); border:1px solid var(--line2); border-radius:6px; padding:4px 6px}
+.humctl .inline{display:flex; align-items:center; gap:6px}
+.humctl input[type=range]{width:100%}
+.humctl small{display:block; font:10px/1.4 var(--sans); letter-spacing:0; text-transform:none; color:var(--tx3); margin-top:3px}
+.dragchip{font:700 12px var(--sans); color:#041012; background:var(--cyan); border:1px solid var(--cyan); border-radius:999px; padding:7px 14px; cursor:grab; text-decoration:none; user-select:none; -webkit-user-drag:element}
+.dragchip[aria-disabled=true]{opacity:.38; cursor:default}
+#humStatus{font:11px var(--mono); color:var(--tx2); letter-spacing:.03em; min-height:1.4em}
 .dropzone{position:absolute; inset:14px; display:none; align-items:center; justify-content:center; font-size:15px; color:#BDF1F4; border:1px dashed var(--cyan); border-radius:14px; background:rgba(98,208,220,.06); pointer-events:none}
 .dropzone.hot{display:flex}
 
@@ -212,6 +233,7 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
   <span id="midiStatus"></span>
   <button id="play" class="primary" disabled>▶ Play</button>
   <button id="export" disabled>Render WAV</button>
+  <button id="humBtn" class="mini" aria-haspopup="dialog" title="Hum or sing a line and turn it into a MIDI file for your DAW">Hum → MIDI</button>
   <button id="detailBtn" class="mini" aria-expanded="false" aria-controls="detail">Detail</button>
   <button id="helpBtn" class="mini" aria-haspopup="dialog" title="How to play, and what to check if you hear nothing">? Help</button>
   <input id="file" type="file" accept="audio/*" hidden>
@@ -333,6 +355,15 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
         </ul>
       </section>
       <section>
+        <h3>Hum → MIDI</h3>
+        <ul>
+          <li><b>Hum → MIDI</b> turns a hummed, sung or whistled line into a MIDI file. <b>Record</b>, <b>Import audio</b>, or use the loaded sound.</li>
+          <li>One note at a time works best. Hum on clear syllables (“dum”, “da”) so repeated notes come out as separate notes.</li>
+          <li>Turn on <b>Click</b> for a 1-bar count-in, so your line starts on bar 1. Without it, the tempo is detected from the take.</li>
+          <li>In Chrome or Edge, drag <b>Drag to DAW</b> straight onto a Logic track. Anywhere else, <b>Download .mid</b> and drag the file in.</li>
+        </ul>
+      </section>
+      <section>
         <h3>Tips</h3>
         <ul>
           <li>For a drone: DRONE on, SPACE high, DRIFT low. Then leave it alone for a minute — it keeps changing.</li>
@@ -342,6 +373,43 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
         </ul>
       </section>
     </div>
+  </div>
+</div>
+
+<div class="help" id="hum" role="dialog" aria-modal="true" aria-labelledby="humTitle">
+  <div class="helpbox humbox">
+    <div class="helphead"><h2 id="humTitle">Hum → MIDI</h2><button id="humClose" class="mini">Close</button></div>
+    <p class="humlede">Hum, sing or whistle one line at a time. It becomes a MIDI file you can drag into Logic or any DAW. Your audio stays on this device.</p>
+    <div class="humrow">
+      <button id="humRec" class="primary">● Record</button>
+      <button id="humImport">Import audio</button>
+      <button id="humUseSrc" title="Analyse the sound loaded in the Observatory">Use loaded sound</button>
+      <label class="humnote"><input type="checkbox" id="humClick"> Click + 1-bar count-in</label>
+      <span class="sp"></span>
+      <span class="humnote" id="humSrc">no audio yet</span>
+      <input id="humFile" type="file" accept="audio/*" hidden>
+    </div>
+    <div class="rollwrap"><canvas id="humRoll"></canvas><div class="rollempty" id="humEmpty">Record or import a hummed line — or drop an audio file here.<br>Headphones help if the click is on.</div></div>
+    <div class="humctl">
+      <div><div class="lbl">Tempo <span class="inline"><input type="number" id="humBpm" min="40" max="240" step="0.1" value="120"><button id="humHalf" class="mini" title="Half tempo">½</button><button id="humDouble" class="mini" title="Double tempo">×2</button></span></div><small id="humBpmNote">Set this to your project’s tempo.</small></div>
+      <div><label for="humGrid">Quantise<select id="humGrid" style="width:auto"><option value="0">Off</option><option value="4">1/4</option><option value="8">1/8</option><option value="16" selected>1/16</option><option value="32">1/32</option></select></label>
+        <label for="humStrength">Strength <span class="val" id="humStrengthV">100%</span></label><input type="range" id="humStrength" min="0" max="1" step="0.05" value="1"></div>
+      <div><label for="humKey">Key<select id="humKey" style="width:auto"></select></label>
+        <label for="humScale">Scale<select id="humScale" style="width:auto"></select></label></div>
+      <div><label for="humOct">Octave<select id="humOct" style="width:auto"><option value="-2">−2</option><option value="-1">−1</option><option value="0" selected>as sung</option><option value="1">+1</option><option value="2">+2</option></select></label>
+        <small>Hums sit low; try −1 for a bassline or +1 for a lead.</small></div>
+      <div><label for="humSens">Sensitivity <span class="val" id="humSensV">50%</span></label><input type="range" id="humSens" min="0" max="1" step="0.05" value="0.5"><small>Raise it if quiet notes are missed.</small></div>
+      <div><label for="humMin">Simplify <span class="val" id="humMinV">80 ms</span></label><input type="range" id="humMin" min="0.04" max="0.3" step="0.01" value="0.08"><small>Shortest note kept. Raise it to drop blips.</small></div>
+    </div>
+    <div class="humrow">
+      <button id="humPlay" disabled>▶ Preview</button>
+      <label class="humnote"><input type="checkbox" id="humWithSrc"> with my audio</label>
+      <span class="humnote" id="humInfo"></span>
+      <span class="sp"></span>
+      <a id="humDrag" class="dragchip" draggable="true" aria-disabled="true" title="Drag into Logic’s tracks area (Chrome or Edge), or click to download">⇣ Drag to DAW</a>
+      <button id="humSave" class="primary" disabled>Download .mid</button>
+    </div>
+    <div id="humStatus" role="status" aria-live="polite"></div>
   </div>
 </div>
 
@@ -902,9 +970,10 @@ async function loadFile(f){
 }
 $('file').addEventListener('change', e=>{ loadFile(e.target.files[0]); e.target.value=''; });
 $('mic').addEventListener('click', ()=>{ openGate(); recordMic(); });
-window.addEventListener('dragover', e=>{ e.preventDefault(); $('dropzone').classList.add('hot'); });
+window.addEventListener('dragover', e=>{ e.preventDefault(); if (!HUM.dragging && !humOpen()) $('dropzone').classList.add('hot'); });
 window.addEventListener('dragleave', e=>{ if (!e.relatedTarget) $('dropzone').classList.remove('hot'); });
-window.addEventListener('drop', e=>{ e.preventDefault(); $('dropzone').classList.remove('hot'); loadFile(e.dataTransfer.files[0]); });
+window.addEventListener('drop', e=>{ e.preventDefault(); $('dropzone').classList.remove('hot'); if (HUM.dragging) return;
+  if (humOpen()) humLoadFile(e.dataTransfer.files[0]); else loadFile(e.dataTransfer.files[0]); });
 $('detailBtn').addEventListener('click', ()=>{ const o = $('detail').classList.toggle('open');
   $('detailBtn').classList.toggle('on', o); $('detailBtn').setAttribute('aria-expanded', o); });
 // ---- help ----
@@ -926,9 +995,10 @@ $('gateHelp').addEventListener('click', ()=>setHelp(true));
 $('helpClose').addEventListener('click', ()=>setHelp(false));
 $('help').addEventListener('click', e=>{ if (e.target === $('help')) setHelp(false); });
 window.addEventListener('keydown', e=>{
-  if (e.code==='Space' && !/^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(e.target.tagName) && hasSource && !$('help').classList.contains('open')){ e.preventDefault(); setPlaying(!playing); }
+  if (e.code==='Space' && !/^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(e.target.tagName) && hasSource && !$('help').classList.contains('open') && !humOpen()){ e.preventDefault(); setPlaying(!playing); }
   else if (e.key==='Escape') {
     if ($('help').classList.contains('open')) setHelp(false);
+    else if (humOpen()) setHum(false);
     else { $('detail').classList.remove('open'); $('detailBtn').classList.remove('on'); $('detailBtn').setAttribute('aria-expanded', false); }
   }
 });
@@ -1152,6 +1222,530 @@ MIDI_BUTTONS.forEach(id=>{ const el=$(id); if(!el) return; el.classList.add('lea
     MIDI.armed={type:'note',id}; setStatus('Hit a pad to bind it to “'+id+'”.'); } }, true);
 });
 refreshAllBadges();
+
+// ================= Hum → MIDI =================
+// Hum or sing one line; get a MIDI file for a DAW. A2M (between the markers) is pure analysis
+// and is tested in Node by webtests/a2m.test.mjs; the rest of this section is the dialog.
+/*A2M-BEGIN*/
+// Audio → MIDI for a single voice (hum, whistle, sung line, mono synth).
+// Pure functions, no DOM: the page and webtests/a2m.test.mjs run the same code.
+const A2M = (() => {
+  // Downsample to ~16 kHz with a boxcar pre-filter: plenty for voice pitch (≤ 1.1 kHz) and 3x cheaper.
+  function downsample(x, sr){
+    const f = Math.max(1, Math.floor(sr / 16000));
+    if (f === 1) return { y: x, sr };
+    const n = Math.floor(x.length / f), y = new Float32Array(n);
+    for (let i = 0; i < n; i++){ let s = 0; for (let j = 0; j < f; j++) s += x[i*f + j]; y[i] = s / f; }
+    return { y, sr: sr / f };
+  }
+
+  // YIN (de Cheveigné & Kawahara 2002) on every hop. Returns per-frame f0 (0 = none), aperiodicity, RMS.
+  function track(x, sr, opt = {}){
+    const fmin = opt.fmin || 55, fmax = opt.fmax || 1100;
+    const hop = Math.round(sr * 0.008), tauMax = Math.ceil(sr / fmin), tauMin = Math.floor(sr / fmax);
+    const W = tauMax + 16, frames = Math.max(0, Math.floor((x.length - W - tauMax) / hop));
+    const f0 = new Float32Array(frames), ap = new Float32Array(frames), rms = new Float32Array(frames);
+    const d = new Float32Array(tauMax + 2);
+    for (let k = 0; k < frames; k++){
+      const o = k * hop;
+      let e = 0; for (let i = 0; i < W; i++) e += x[o+i]*x[o+i];
+      rms[k] = Math.sqrt(e / W);
+      if (e < 1e-10){ ap[k] = 1; continue; }
+      let run = 0; d[0] = 1;
+      for (let t = 1; t <= tauMax; t++){
+        let s = 0; for (let i = 0; i < W; i++){ const q = x[o+i] - x[o+i+t]; s += q*q; }
+        run += s; d[t] = run > 0 ? s * t / run : 1;
+      }
+      let tau = -1;
+      for (let t = Math.max(2, tauMin); t < tauMax; t++){
+        if (d[t] < 0.15){ while (t + 1 < tauMax && d[t+1] < d[t]) t++; tau = t; break; }
+      }
+      if (tau < 0){ // no dip under threshold: take the global minimum, flagged by its aperiodicity
+        let best = 1e9; for (let t = Math.max(2, tauMin); t < tauMax; t++) if (d[t] < best){ best = d[t]; tau = t; }
+      }
+      const a = d[tau-1], b = d[tau], c = d[tau+1], den = a - 2*b + c;
+      const ft = den > 0 ? tau + 0.5*(a - c)/den : tau;
+      f0[k] = sr / ft; ap[k] = b;
+    }
+    return { f0, ap, rms, hop: hop / sr, sr };
+  }
+
+  const median = a => { const s = Array.from(a).sort((p, q) => p - q); return s.length ? s[s.length >> 1] : 0; };
+  const toMidi = f => 69 + 12 * Math.log2(f / 440);
+
+  // Frames → notes {start, dur (s), pitch (MIDI int), vel (1–127), cents (raw float pitch)}.
+  // A hum slides between notes, so a note is a *plateau* of steady pitch; the slide into it belongs to it.
+  function segment(tr, opt = {}){
+    const { f0, ap, hop } = tr, n = f0.length, rms = tr.rms.slice();   // copy: hole-bridging edits it
+    const minDur = opt.minNote ?? 0.08, apMax = opt.apMax ?? 0.3;
+    const sens = opt.sensitivity ?? 0.5;              // 0 = only loud, clear notes … 1 = catch quiet ones
+    // Loudness gate relative to the take: the 95th-percentile frame sets the reference.
+    const sorted = Array.from(rms).sort((p, q) => p - q), ref = sorted[Math.floor(n * 0.95)] || 0;
+    const gate = Math.max(1e-4, ref * Math.pow(10, -(14 + 16*sens) / 20));   // −14 … −30 dB below reference
+    const voiced = new Uint8Array(n), m = new Float32Array(n);
+    for (let k = 0; k < n; k++){ voiced[k] = rms[k] > gate && ap[k] < apMax && f0[k] > 0 ? 1 : 0; m[k] = voiced[k] ? toMidi(f0[k]) : 0; }
+    // Fix octave jumps and smooth with a 5-frame median over voiced neighbours.
+    const sm = new Float32Array(n);
+    for (let k = 0; k < n; k++){
+      if (!voiced[k]) continue;
+      const w = []; for (let j = k-2; j <= k+2; j++) if (j >= 0 && j < n && voiced[j]) w.push(m[j]);
+      const md = median(w); let v = m[k];
+      while (v - md > 6) v -= 12; while (md - v > 6) v += 12;
+      sm[k] = Math.abs(v - md) > 1 ? md : v;
+    }
+    // Bridge unvoiced holes up to ~40 ms inside a phrase (breath noise, YIN dropouts) when the pitch carries on.
+    const bridge = Math.round(0.04 / hop);
+    for (let k = 1; k < n; k++){
+      if (voiced[k] || !voiced[k-1]) continue;
+      let j = k; while (j < n && !voiced[j] && j - k <= bridge) j++;
+      if (j < n && voiced[j] && j - k <= bridge && Math.abs(sm[j] - sm[k-1]) < 1.5)
+        for (let q = k; q < j; q++){ voiced[q] = 1; sm[q] = sm[k-1] + (sm[j]-sm[k-1]) * (q-k+1)/(j-k+1); rms[q] = Math.max(rms[q], gate); }
+    }
+    const minF = Math.max(2, Math.round(minDur / hop)), stableF = Math.max(3, Math.round(0.04 / hop));
+    const notes = [];
+    const emit = (a, b, pitchFrames) => {
+      if (b - a < minF) return;
+      const p = median(pitchFrames);
+      let pk = 0; for (let k = a; k < b; k++) pk = Math.max(pk, rms[k]);
+      const db = 20 * Math.log10(pk / (ref || 1));
+      notes.push({ start: a*hop, dur: (b-a)*hop, cents: p, pitch: Math.round(p), vel: Math.round(Math.max(30, Math.min(127, 100 + db*3))) });
+    };
+    // Re-articulation inside one steady note ("dum-dum" on one pitch): a loudness dip between two louder parts.
+    const dips = (a, b) => {
+      const cuts = [];
+      let peak = 0, last = a;
+      for (let k = a; k < b; k++){
+        peak = Math.max(peak, rms[k]);
+        if (k - last < minF || b - k < minF) continue;
+        const lo = rms[k]; if (lo > peak * 0.5) continue;
+        if (!(rms[k] <= rms[k-1] && rms[k] <= rms[k+1])) continue;
+        let after = 0; for (let j = k; j < Math.min(b, k + minF*2); j++) after = Math.max(after, rms[j]);
+        if (after > lo * 2){ cuts.push(k); last = k; peak = 0; }
+      }
+      return cuts;
+    };
+    let k = 0;
+    while (k < n){
+      if (!voiced[k]){ k++; continue; }
+      const a = k; while (k < n && voiced[k]) k++;
+      const b = k;                                    // one voiced phrase [a, b)
+      if (b - a < minF) continue;
+      // Steady frames: pitch moves less than half a semitone across ±2 frames.
+      const steady = new Uint8Array(b - a);
+      for (let i = a; i < b; i++){ const l = Math.max(a, i-2), r = Math.min(b-1, i+2); steady[i-a] = Math.abs(sm[r] - sm[l]) < 0.5 ? 1 : 0; }
+      // Plateaus: runs of steady frames, merged when neighbours sit on the same semitone.
+      // A gentle one-semitone slide can pass as steady, so a run is also split where the pitch
+      // leaves its level by more than 0.6 semitones for 3 frames.
+      const pl = [];
+      const addRun = (s, e) => {
+        let from = s, sum = sm[s], cnt = 1;
+        for (let i = s + 1; i < e; i++){
+          const lvl = sum / cnt;
+          if (i + 2 < e && Math.abs(sm[i] - lvl) > 0.6 && Math.abs(sm[i+1] - lvl) > 0.6 && Math.abs(sm[i+2] - lvl) > 0.6){
+            if (i - from >= stableF) pl.push({ s: from, e: i, p: median(sm.subarray(from, i)) });
+            from = i; sum = 0; cnt = 0;
+          }
+          sum += sm[i]; cnt++;
+        }
+        if (e - from >= stableF) pl.push({ s: from, e, p: median(sm.subarray(from, e)) });
+      };
+      for (let i = 0; i < steady.length;){
+        if (!steady[i]){ i++; continue; }
+        const s = i; while (i < steady.length && steady[i]) i++;
+        addRun(a + s, a + i);
+      }
+      const merged = [];
+      for (const q of pl){ const prev = merged[merged.length-1];
+        if (prev && Math.abs(prev.p - q.p) < 0.6){ prev.e = q.e; prev.p = median(sm.subarray(prev.s, prev.e)); } else merged.push({ ...q }); }
+      if (!merged.length){ emit(a, b, Array.from(sm.subarray(a, b))); continue; }   // one long swoop: its median
+      // Boundaries: the phrase edges, and the middle of each slide between two plateaus.
+      for (let i = 0; i < merged.length; i++){
+        const s = i === 0 ? a : Math.round((merged[i-1].e + merged[i].s) / 2);
+        const e = i === merged.length-1 ? b : Math.round((merged[i].e + merged[i+1].s) / 2);
+        // Each piece of a re-articulated note takes the pitch of its own part of the plateau.
+        const ps = merged[i].s, pe = merged[i].e, body = (x, y) => Array.from(sm.subarray(Math.max(ps, x), Math.min(pe, y)));
+        let from = s;
+        for (const c of dips(ps, pe)){ emit(from, c, body(from, c)); from = c; }
+        emit(from, e, body(from, e));
+      }
+    }
+    return notes;
+  }
+
+  // Tempo from note onsets: score each candidate BPM by how well the onsets sit on its 16th grid.
+  function estimateTempo(notes, lo = 70, hi = 180){
+    if (notes.length < 4) return 0;
+    const on = notes.map(n => n.start), w = notes.map(n => Math.min(1, n.dur / 0.2) + 0.3);
+    let best = 0, bs = -1;
+    for (let bpm = lo; bpm <= hi; bpm += 0.5){
+      const step = 60 / bpm / 4;               // 16th note
+      // Phase-free fit: sum of unit vectors of each onset's position on the 8th-note circle.
+      let cx = 0, cy = 0, W = 0;
+      for (let i = 0; i < on.length; i++){ const ph = 2*Math.PI*on[i]/(step*2); cx += w[i]*Math.cos(ph); cy += w[i]*Math.sin(ph); W += w[i]; }
+      let c4x = 0, c4y = 0;
+      for (let i = 0; i < on.length; i++){ const ph = 2*Math.PI*on[i]/(step*4); c4x += w[i]*Math.cos(ph); c4y += w[i]*Math.sin(ph); }
+      const score = (Math.hypot(cx, cy) + 0.7*Math.hypot(c4x, c4y)) / W;
+      if (score > bs + 1e-9){ bs = score; best = bpm; }
+    }
+    return best;
+  }
+
+  // Key detection: Krumhansl-Schmuckler profiles weighted by note length.
+  const MAJ = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+  const MIN = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+  function detectKey(notes){
+    const h = new Array(12).fill(0); for (const n of notes) h[((n.pitch % 12) + 12) % 12] += n.dur;
+    if (!h.some(v => v > 0)) return { tonic: 0, minor: false, score: 0 };
+    const corr = (prof, r) => { const mx = h.reduce((s, v) => s+v, 0)/12, mp = prof.reduce((s, v) => s+v, 0)/12;
+      let num = 0, dx = 0, dp = 0; for (let i = 0; i < 12; i++){ const a = h[(i+r)%12]-mx, b = prof[i]-mp; num += a*b; dx += a*a; dp += b*b; }
+      return num / Math.sqrt(dx*dp || 1); };
+    let best = { tonic: 0, minor: false, score: -2 };
+    for (let r = 0; r < 12; r++) for (const minor of [false, true]){ const s = corr(minor ? MIN : MAJ, r); if (s > best.score) best = { tonic: r, minor, score: s }; }
+    return best;
+  }
+
+  // Snap each note to the nearest pitch class in `set` (semitones above `tonic`), choosing by the raw sung pitch.
+  function snapToScale(notes, tonic, set){
+    return notes.map(n => {
+      let best = n.pitch, bd = 99;
+      for (let p = Math.floor(n.cents) - 2; p <= Math.ceil(n.cents) + 2; p++){
+        if (!set.includes(((p - tonic) % 12 + 12) % 12)) continue;
+        const dd = Math.abs(p - n.cents); if (dd < bd){ bd = dd; best = p; }
+      }
+      return { ...n, pitch: best };
+    });
+  }
+
+  // Where bar 1 starts, in seconds of the take. Starts from `t0` (the first note, or the end of a count-in)
+  // and nudges by up to half a 16th so the onsets as a whole sit on the grid, not just the first one.
+  function alignStart(notes, bpm, t0){
+    if (!notes.length) return t0;
+    const step = 60 / bpm / 4; let cx = 0, cy = 0;
+    for (const n of notes){ const ph = 2*Math.PI*(n.start - t0)/step, w = Math.min(1, n.dur/0.2) + 0.3; cx += w*Math.cos(ph); cy += w*Math.sin(ph); }
+    return t0 + Math.atan2(cy, cx) / (2*Math.PI) * step;
+  }
+
+  // Seconds → ticks from bar 1 at `t0`. grid = notes per bar (4, 8, 16, 32; 0 = off); strength 1 = hard quantise, 0 = keep the feel.
+  function toTicks(notes, opt = {}){
+    const ppq = opt.ppq || 480, bpm = opt.bpm || 120, grid = opt.grid || 0, strength = opt.strength ?? 1, t0 = opt.t0 || 0;
+    const tps = ppq * bpm / 60, g = grid ? ppq * 4 / grid : 0;
+    const q = t => { const raw = (t - t0) * tps; return Math.max(0, Math.round(g ? raw + (Math.round(raw/g)*g - raw) * strength : raw)); };
+    const minLen = g ? Math.max(1, Math.round(g * strength + (ppq/8) * (1 - strength))) : ppq/16;
+    const out = notes.map(n => { const on = q(n.start); let off = q(n.start + n.dur); if (off - on < minLen) off = on + minLen;
+      return { on, off, pitch: n.pitch, vel: n.vel }; });
+    // Notes from one voice never overlap: trim a note that runs into the next; keep the longer of two on one tick.
+    out.sort((a, b) => a.on - b.on);
+    const res = [];
+    for (const n of out){ const p = res[res.length-1];
+      if (p && p.on === n.on){ if (n.off - n.on > p.off - p.on) Object.assign(p, n); continue; }
+      if (p && p.off > n.on) p.off = n.on; res.push(n); }
+    return { ppq, bpm, t0, notes: res.filter(n => n.off > n.on) };
+  }
+
+  // Standard MIDI File, format 0, one track on channel 1.
+  function writeMidi(t, name){
+    const bytes = [], u32 = v => [(v>>>24)&255, (v>>>16)&255, (v>>>8)&255, v&255];
+    const vlq = v => { const s = [v & 127]; while ((v >>>= 7)) s.unshift((v & 127) | 128); return s; };
+    const ev = [];
+    const mpqn = Math.round(60000000 / t.bpm);
+    ev.push({ t: 0, d: [0xFF, 0x51, 3, (mpqn>>16)&255, (mpqn>>8)&255, mpqn&255] });
+    ev.push({ t: 0, d: [0xFF, 0x58, 4, 4, 2, 24, 8] });
+    const nm = Array.from(new TextEncoder().encode(name || 'Grooverider')).slice(0, 120);
+    ev.push({ t: 0, d: [0xFF, 0x03, ...vlq(nm.length), ...nm] });
+    for (const n of t.notes){ const p = Math.max(0, Math.min(127, n.pitch));
+      ev.push({ t: n.on, d: [0x90, p, Math.max(1, Math.min(127, n.vel))], o: 1 }); ev.push({ t: n.off, d: [0x80, p, 64], o: 0 }); }
+    ev.sort((a, b) => a.t - b.t || (a.o ?? -1) - (b.o ?? -1));   // meta first, note-offs before note-ons at the same tick
+    const trk = []; let last = 0;
+    for (const e of ev){ trk.push(...vlq(e.t - last), ...e.d); last = e.t; }
+    trk.push(0, 0xFF, 0x2F, 0);
+    bytes.push(0x4D,0x54,0x68,0x64, ...u32(6), 0,0, 0,1, (t.ppq>>8)&255, t.ppq&255);
+    bytes.push(0x4D,0x54,0x72,0x6B, ...u32(trk.length), ...trk);
+    return new Uint8Array(bytes);
+  }
+
+  function analyse(x, sr, opt = {}){
+    const ds = downsample(x, sr);
+    const tr = track(ds.y, ds.sr, opt);
+    const notes = segment(tr, opt);
+    return { track: tr, notes, bpm: estimateTempo(notes) };
+  }
+
+  return { downsample, track, segment, estimateTempo, detectKey, snapToScale, alignStart, toTicks, writeMidi, analyse, toMidi };
+})();
+/*A2M-END*/
+
+const HUM_MAX_REC = 60, HUM_MAX_IMPORT = 300;           // seconds
+const HUM_PREFS = 'grvr.hum.v1';
+const HUM = { x:null, sr:0, name:'', track:null, ref:0, raw:[], key:null, countIn:null, out:null, url:'', file:'', preview:null, rec:null, dragging:false };
+const humStatus = t => { $('humStatus').textContent = t; };
+const humBpm = () => clamp(+$('humBpm').value || 120, 40, 240);
+$('humKey').innerHTML = '<option value="none">As sung</option><option value="auto">Auto</option>' + KEYS.map((k,i)=>'<option value="'+i+'">'+k+'</option>').join('');
+$('humScale').innerHTML = [2,3,4,5].map(i=>'<option value="'+i+'">'+SCALE_NAMES[i]+'</option>').join('');
+$('humKey').value = 'auto'; $('humScale').value = '3';
+
+// Per-browser conveniences only: tempo, quantise, click, octave.
+try { const p = JSON.parse(localStorage.getItem(HUM_PREFS) || '{}');
+  if (p.bpm) $('humBpm').value = p.bpm; if (p.grid != null) $('humGrid').value = p.grid; if (p.strength != null) $('humStrength').value = p.strength;
+  if (p.oct != null) $('humOct').value = p.oct; $('humClick').checked = !!p.click; } catch(e){}
+function humSavePrefs(){ try { localStorage.setItem(HUM_PREFS, JSON.stringify({ bpm:humBpm(), grid:$('humGrid').value, strength:$('humStrength').value, oct:$('humOct').value, click:$('humClick').checked })); } catch(e){} }
+
+let humReturn = null;
+function setHum(open){
+  const h = $('hum'); if (open === h.classList.contains('open')) return;
+  h.classList.toggle('open', open);
+  if (open){
+    humReturn = document.activeElement; openGate();
+    if (playing){ setPlaying(false); humStatus('Paused the Observatory so it stays out of the mic.'); }
+    $('humUseSrc').disabled = !curSource; $('humClose').focus(); requestAnimationFrame(drawRoll);
+  } else {
+    humStopPreview(); if (HUM.rec) HUM.rec.stop();
+    if (humReturn && humReturn.focus) humReturn.focus();
+  }
+}
+const humOpen = () => $('hum').classList.contains('open');
+
+// ---- input ----
+function humAnalyse(x, sr, name, countIn){
+  humStopPreview();
+  HUM.x = x; HUM.sr = sr; HUM.name = name; HUM.countIn = countIn;   // countIn: { bpm, start } — bar 1, in seconds of the take
+  $('humSrc').textContent = name + ' · ' + (x.length/sr).toFixed(1) + ' s';
+  humStatus('Listening for notes…');
+  setTimeout(()=>{                                     // let the status paint before the (short) analysis blocks
+    const ds = A2M.downsample(x, sr);
+    HUM.track = A2M.track(ds.y, ds.sr);
+    const r = Array.from(HUM.track.rms).sort((a,b)=>a-b); HUM.ref = r[Math.floor(r.length*0.95)] || 0;
+    humSegment(true);
+  }, 30);
+}
+function humSegment(fresh){
+  if (!HUM.track) return;
+  HUM.raw = A2M.segment(HUM.track, { sensitivity:+$('humSens').value, minNote:+$('humMin').value });
+  HUM.key = A2M.detectKey(HUM.raw);
+  $('humKey').options[1].textContent = HUM.raw.length ? 'Auto · ' + KEYS[HUM.key.tonic] + (HUM.key.minor ? ' minor' : ' major') : 'Auto';
+  if (fresh){
+    if (HUM.countIn){ $('humBpm').value = HUM.countIn.bpm; $('humBpmNote').textContent = 'The click tempo. Logic places notes by beat, so this fits a project at any tempo.'; }
+    else {
+      const g = A2M.estimateTempo(HUM.raw);
+      if (g){ $('humBpm').value = g; $('humBpmNote').textContent = 'Detected from your take. If the bars look too busy or too sparse, try ½ or ×2.'; }
+      else $('humBpmNote').textContent = 'Too few notes to detect a tempo: set the tempo you hummed at.';
+    }
+  }
+  humBuild();
+  humStatus(HUM.raw.length ? '' : 'No clear notes found. Try Sensitivity higher, or hum louder and closer to the mic.');
+}
+
+function humBuild(){
+  if (!HUM.track){ drawRoll(); return; }
+  const bpm = humBpm(), kv = $('humKey').value, oct = +$('humOct').value;
+  let notes = HUM.raw, keyText = 'as sung';
+  if (kv !== 'none' && notes.length){
+    const tonic = kv === 'auto' ? HUM.key.tonic : +kv, sc = kv === 'auto' ? (HUM.key.minor ? 3 : 2) : +$('humScale').value;
+    notes = A2M.snapToScale(notes, tonic, SCALE_SETS[sc]);
+    keyText = KEYS[tonic] + ' ' + SCALE_NAMES[sc].toLowerCase();
+    if (kv === 'auto') $('humScale').value = String(sc);
+  }
+  if (oct) notes = notes.map(n => ({ ...n, pitch: n.pitch + 12*oct }));
+  let t0;
+  if (HUM.countIn){ t0 = A2M.alignStart(notes.filter(n => n.start + n.dur > HUM.countIn.start), bpm, HUM.countIn.start);
+    notes = notes.filter(n => n.start + n.dur > t0 + 0.03); }                     // anything hummed over the count-in
+  else t0 = notes.length ? A2M.alignStart(notes, bpm, notes[0].start) : 0;
+  HUM.out = A2M.toTicks(notes, { bpm, grid:+$('humGrid').value, strength:+$('humStrength').value, t0 });
+  HUM.out.oct = oct;
+  const n = HUM.out.notes.length, bars = n ? Math.ceil(HUM.out.notes[n-1].off / (HUM.out.ppq*4)) : 0;
+  $('humInfo').textContent = n ? n + ' note' + (n>1?'s':'') + ' · ' + keyText + ' · ' + bars + ' bar' + (bars>1?'s':'') : '';
+  $('humScale').disabled = kv === 'none' || kv === 'auto';
+  $('humPlay').disabled = $('humSave').disabled = !n;
+  $('humDrag').setAttribute('aria-disabled', String(!n));
+  // A data: URL (not blob:) so dragging it out of Chrome into Logic writes a real .mid file.
+  HUM.file = 'GR_hum_' + Math.round(bpm) + 'bpm' + (kv === 'none' ? '' : '_' + keyText.replace(/[^A-Za-z0-9♯♭]+/g,'').replace('♯','s').replace('♭','b')) + '.mid';
+  if (n){ const bytes = A2M.writeMidi(HUM.out, 'Grooverider hum'); let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+    HUM.url = 'data:audio/midi;base64,' + btoa(s); $('humDrag').href = HUM.url; $('humDrag').download = HUM.file; }
+  else { HUM.url = ''; $('humDrag').removeAttribute('href'); }
+  drawRoll();
+}
+
+async function humRecord(){
+  if (HUM.rec){ HUM.rec.stop(); return; }
+  humStopPreview();
+  try { await ensureAudio(); if (ctx.state==='suspended') await ctx.resume(); } catch(e){ return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}); }
+  catch(e){ humStatus('Mic access denied or unavailable.'); return; }
+  const sr = ctx.sampleRate, src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
+  const mute = ctx.createGain(); mute.gain.value = 0;
+  const chunks = []; let frames = 0, firstT = null; const cap = Math.floor(sr*HUM_MAX_REC);
+  const useClick = $('humClick').checked, bpm = humBpm(), beat = 60/bpm;
+  let clickBus = null, barAt = 0;
+  if (useClick){                                         // 1-bar count-in, then a click for as long as the take runs
+    clickBus = ctx.createGain(); clickBus.gain.value = 0.35; clickBus.connect(ctx.destination);
+    const at0 = ctx.currentTime + 0.25; barAt = at0 + 4*beat;
+    for (let i = 0; i < Math.ceil((HUM_MAX_REC + 4*beat) / beat); i++){
+      const t = at0 + i*beat, o = ctx.createOscillator(), g = ctx.createGain(), down = i % 4 === 0;
+      o.frequency.value = down ? 1760 : 1320; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(i < 4 ? 1 : 0.6, t + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.04); o.connect(g).connect(clickBus); o.start(t); o.stop(t + 0.05);
+    }
+  }
+  $('humRec').classList.add('on');
+  humStatus(useClick ? 'Count-in: 1 bar, then hum. Click Stop when you are done.' : 'Recording… hum, then click Stop.');
+  const stop = () => {
+    if (HUM.rec !== rec) return; HUM.rec = null;
+    try { src.disconnect(); proc.disconnect(); mute.disconnect(); stream.getTracks().forEach(t=>t.stop()); if (clickBus) clickBus.disconnect(); } catch(e){}
+    $('humRec').classList.remove('on'); $('humRec').textContent = '● Record';
+    frames = Math.min(frames, cap);
+    if (!frames){ humStatus('Nothing recorded.'); return; }
+    const all = new Float32Array(frames); let o = 0;
+    for (const c of chunks){ if (o >= frames) break; all.set(c.subarray(0, Math.min(c.length, frames-o)), o); o += c.length; }
+    // Bar 1 in the take: where the count-in ended, plus the output latency (you hear the click late, so you sing late).
+    const countIn = useClick && firstT != null ? { bpm, start: Math.max(0, barAt - firstT + (ctx.outputLatency || ctx.baseLatency || 0)) } : null;
+    if (countIn && countIn.start >= frames/sr){ humStatus('Stopped during the count-in — nothing to convert.'); return; }
+    humAnalyse(all, sr, 'mic take', countIn);
+  };
+  const rec = { stop };
+  HUM.rec = rec;
+  proc.onaudioprocess = ev => {
+    if (HUM.rec !== rec) return;
+    if (firstT === null) firstT = ctx.currentTime - ev.inputBuffer.duration;
+    chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0))); frames += ev.inputBuffer.length;
+    const s = Math.floor(frames/sr); $('humRec').textContent = '■ Stop ' + Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+    if (frames >= cap) stop();
+  };
+  src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+}
+
+async function humLoadFile(f){
+  if (!f) return;
+  humStatus('Decoding ' + f.name + ' …');
+  try {
+    await ensureAudio();
+    const audio = await ctx.decodeAudioData(await f.arrayBuffer());
+    const n = Math.min(audio.length, Math.floor(audio.sampleRate*HUM_MAX_IMPORT)), x = new Float32Array(n);
+    for (let c = 0; c < audio.numberOfChannels; c++){ const d = audio.getChannelData(c); for (let i = 0; i < n; i++) x[i] += d[i] / audio.numberOfChannels; }
+    humAnalyse(x, audio.sampleRate, f.name, null);
+    if (audio.length > n) setTimeout(()=>humStatus('Used the first ' + HUM_MAX_IMPORT/60 + ' minutes.'), 60);
+  } catch(err){ humStatus('Could not decode that file. Try WAV, MP3 or M4A.'); }
+}
+function humUseSource(){
+  if (!curSource) return;
+  const n = curSource.frames, x = new Float32Array(n), r = curSource.channels > 1 ? curSource.r : curSource.l;
+  for (let i = 0; i < n; i++) x[i] = 0.5*(curSource.l[i] + r[i]);
+  humAnalyse(x, ctx.sampleRate, curSource.name, null);
+}
+
+// ---- preview: a soft triangle synth plays the MIDI as written (after quantise), optionally over the take ----
+function humStopPreview(){
+  const p = HUM.preview; if (!p) return; HUM.preview = null;
+  try { p.out.gain.setTargetAtTime(0, ctx.currentTime, 0.02); setTimeout(()=>p.out.disconnect(), 150); } catch(e){}
+  for (const s of p.srcs) try { s.stop(ctx.currentTime + 0.1); } catch(e){}
+  clearTimeout(p.timer); $('humPlay').textContent = '▶ Preview'; $('humPlay').classList.remove('on'); drawRoll();
+}
+async function humPreview(){
+  if (HUM.preview){ humStopPreview(); return; }
+  if (!HUM.out || !HUM.out.notes.length) return;
+  try { await ensureAudio(); if (ctx.state==='suspended') await ctx.resume(); } catch(e){ return; }
+  const out = ctx.createGain(); out.gain.value = 0.6; out.connect(ctx.destination);
+  const start = ctx.currentTime + 0.08, spt = 60 / (HUM.out.bpm * HUM.out.ppq), srcs = [];
+  let end = start;
+  for (const n of HUM.out.notes){
+    const a = start + n.on*spt, b = start + n.off*spt, v = 0.08 + 0.22*n.vel/127;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle'; o.frequency.value = 440 * Math.pow(2, (n.pitch - 69)/12);
+    g.gain.setValueAtTime(0, a); g.gain.linearRampToValueAtTime(v, a + 0.006); g.gain.setTargetAtTime(v*0.65, a + 0.01, 0.12); g.gain.setTargetAtTime(0, b, 0.025);
+    o.connect(g).connect(out); o.start(a); o.stop(b + 0.2); srcs.push(o); end = Math.max(end, b + 0.2);
+  }
+  if ($('humWithSrc').checked && HUM.x){
+    const buf = ctx.createBuffer(1, HUM.x.length, HUM.sr); buf.copyToChannel(HUM.x, 0);
+    let pk = 1e-4; for (let i = 0; i < HUM.x.length; i++){ const a = Math.abs(HUM.x[i]); if (a > pk) pk = a; }
+    const s = ctx.createBufferSource(), g = ctx.createGain(); s.buffer = buf; g.gain.value = 0.35/pk;
+    // Line the take's bar 1 up with the synth's; the take is unquantised, so it drifts if Quantise moved notes a lot.
+    const off = HUM.out.t0;
+    s.connect(g).connect(out); if (off >= 0) s.start(start, off); else s.start(start - off, 0);
+    srcs.push(s); end = Math.max(end, start + HUM.x.length/HUM.sr - off);
+  }
+  HUM.preview = { out, srcs, start, spt, timer: setTimeout(humStopPreview, (end - ctx.currentTime)*1000 + 100) };
+  $('humPlay').textContent = '■ Stop'; $('humPlay').classList.add('on');
+  (function tick(){ if (!HUM.preview) return; drawRoll(); requestAnimationFrame(tick); })();
+}
+
+// ---- piano roll: bars and beats across, pitch up; the sung pitch line under the MIDI notes ----
+function drawRoll(){
+  const cv = $('humRoll'), w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cv.width !== Math.round(w*dpr) || cv.height !== Math.round(h*dpr)){ cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const out = HUM.out, has = !!(out && out.notes.length);
+  $('humEmpty').hidden = has;
+  if (!has) return;
+  const { ppq, bpm, t0, notes } = out, tps = ppq*bpm/60, bar = ppq*4;
+  const endT = Math.max(bar, Math.ceil(notes[notes.length-1].off / bar) * bar);
+  let lo = 127, hi = 0; for (const n of notes){ lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); }
+  lo -= 2; hi += 2; if (hi - lo < 14){ const c = (hi + lo)/2; lo = Math.floor(c - 7); hi = Math.ceil(c + 7); }
+  const L = 34, T = 16, X = t => L + (w - L - 6) * t / endT, rowH = (h - T - 4) / (hi - lo + 1), Y = p => T + (hi - p) * rowH;
+  g.font = '9px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+  for (let p = lo; p <= hi; p++){
+    if ([1,3,6,8,10].includes(((p % 12) + 12) % 12)){ g.fillStyle = 'rgba(150,205,200,.035)'; g.fillRect(L, Y(p), w - L, rowH); }
+    if (p % 12 === 0){ g.fillStyle = '#5A6F6C'; g.fillText(noteName(p), 4, Y(p) + rowH*0.5 + 3); g.fillStyle = 'rgba(150,205,200,.10)'; g.fillRect(L, Y(p) + rowH - 0.5, w - L, 1); }
+  }
+  for (let t = 0; t <= endT; t += ppq){
+    const isBar = t % bar === 0; g.fillStyle = isBar ? 'rgba(150,205,200,.26)' : 'rgba(150,205,200,.08)'; g.fillRect(Math.round(X(t)), T, 1, h - T);
+    if (isBar && t < endT){ g.fillStyle = '#8FA6A2'; g.fillText(String(t/bar + 1), X(t) + 3, 11); }
+  }
+  // Sung pitch, mapped through the same tempo and start, shifted by the octave setting.
+  const tr = HUM.track, gate = HUM.ref * 0.05;
+  g.strokeStyle = 'rgba(98,208,220,.55)'; g.lineWidth = 1.5; g.beginPath(); let pen = false, last = 0;
+  for (let k = 0; k < tr.f0.length; k++){
+    const ok = tr.ap[k] < 0.2 && tr.rms[k] > gate && tr.f0[k] > 0;
+    const t = (k*tr.hop - t0) * tps, p = A2M.toMidi(tr.f0[k]) + 12*out.oct;
+    if (!ok || t < 0 || t > endT || p < lo - 1 || p > hi + 1){ pen = false; continue; }
+    const x = X(t), y = Y(p) + rowH/2;
+    if (pen && Math.abs(p - last) < 1.5) g.lineTo(x, y); else g.moveTo(x, y);
+    pen = true; last = p;
+  }
+  g.stroke();
+  for (const n of notes){
+    const x = X(n.on), x2 = X(n.off), y = Y(n.pitch);
+    g.fillStyle = 'rgba(232,168,87,' + (0.45 + 0.5*n.vel/127).toFixed(2) + ')';
+    g.beginPath(); (g.roundRect ? g.roundRect(x + 0.5, y + 1, Math.max(2, x2 - x - 1), Math.max(2, rowH - 2), 2) : g.rect(x + 0.5, y + 1, Math.max(2, x2 - x - 1), Math.max(2, rowH - 2))); g.fill();
+  }
+  if (HUM.preview){
+    const t = (ctx.currentTime - HUM.preview.start) / HUM.preview.spt;
+    if (t >= 0 && t <= endT){ g.fillStyle = '#E6EEEA'; g.fillRect(Math.round(X(t)), T, 1.5, h - T); }
+  }
+}
+
+function humSave(){
+  if (!HUM.url) return;
+  const a = document.createElement('a'); a.href = HUM.url; a.download = HUM.file;
+  document.body.appendChild(a); a.click(); a.remove();
+  humStatus('Saved ' + HUM.file + ' — check your downloads, then drag it onto a track in Logic.');
+}
+
+$('humBtn').addEventListener('click', ()=>setHum(true));
+$('humClose').addEventListener('click', ()=>setHum(false));
+$('hum').addEventListener('click', e=>{ if (e.target === $('hum')) setHum(false); });
+$('humRec').addEventListener('click', humRecord);
+$('humImport').addEventListener('click', ()=>$('humFile').click());
+$('humFile').addEventListener('change', e=>{ humLoadFile(e.target.files[0]); e.target.value = ''; });
+$('humUseSrc').addEventListener('click', humUseSource);
+$('humPlay').addEventListener('click', humPreview);
+$('humSave').addEventListener('click', humSave);
+$('humHalf').addEventListener('click', ()=>{ $('humBpm').value = +(humBpm()/2).toFixed(1); $('humBpm').dispatchEvent(new Event('change')); });
+$('humDouble').addEventListener('click', ()=>{ $('humBpm').value = +(humBpm()*2).toFixed(1); $('humBpm').dispatchEvent(new Event('change')); });
+for (const id of ['humBpm','humGrid','humKey','humScale','humOct','humStrength'])
+  $(id).addEventListener(id === 'humStrength' ? 'input' : 'change', ()=>{ humStopPreview(); humBuild(); humSavePrefs(); });
+$('humClick').addEventListener('change', humSavePrefs);
+$('humStrength').addEventListener('input', ()=>{ $('humStrengthV').textContent = pct(+$('humStrength').value) + '%'; });
+$('humSens').addEventListener('input', ()=>{ $('humSensV').textContent = pct(+$('humSens').value) + '%'; humStopPreview(); humSegment(false); });
+$('humMin').addEventListener('input', ()=>{ $('humMinV').textContent = Math.round(+$('humMin').value*1000) + ' ms'; humStopPreview(); humSegment(false); });
+$('humStrengthV').textContent = pct(+$('humStrength').value) + '%';
+$('humDrag').addEventListener('dragstart', e=>{
+  if (!HUM.url){ e.preventDefault(); return; }
+  HUM.dragging = true;
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('DownloadURL', 'audio/midi:' + HUM.file + ':' + HUM.url);   // Chrome/Edge: dropping writes the file
+});
+$('humDrag').addEventListener('dragend', ()=>{ HUM.dragging = false; });
+$('humDrag').addEventListener('click', e=>{ e.preventDefault(); humSave(); });
+window.addEventListener('resize', ()=>{ if (humOpen()) drawRoll(); });
 
 // ================= visuals: the Observatory =================
 // Motes: every active grain becomes a small translucent body (ovum or fry) plus two

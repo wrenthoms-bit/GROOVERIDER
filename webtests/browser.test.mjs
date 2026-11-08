@@ -59,6 +59,25 @@ const TONE = path.join(TMP, 'tone.wav');
   b.writeUInt32LE(sr,24); b.writeUInt32LE(sr*2,28); b.writeUInt16LE(2,32); b.writeUInt16LE(16,34); b.write('data',36); b.writeUInt32LE(n*2,40);
   for (let i=0;i<n;i++) b.writeInt16LE(Math.round(12000*Math.sin(2*Math.PI*220*i/sr)), 44+i*2);
   fs.writeFileSync(TONE, b); }
+// a hummed line to turn into MIDI: A3 C4 E4 D4 C4 at 120 BPM, one note per 8th, harmonics like a voice
+const HUMWAV = path.join(TMP, 'hum line.wav'), HUM_NOTES = [57, 60, 64, 62, 60];
+{ const sr = 48000, beat = 0.25, n = Math.round(sr*(0.4 + HUM_NOTES.length*beat + 0.4)), b = Buffer.alloc(44 + n*2), x = new Float32Array(n);
+  HUM_NOTES.forEach((p, k) => { const a = Math.round(sr*(0.4 + k*beat)), len = Math.round(sr*beat*0.8), f = 440*Math.pow(2, (p-69)/12);
+    for (let i = 0; i < len; i++){ const env = Math.min(1, i/600, (len-i)/1200); let v = 0; for (let h = 1; h <= 6; h++) v += Math.sin(2*Math.PI*f*h*i/sr)/h; x[a+i] = 0.15*env*v; } });
+  b.write('RIFF',0); b.writeUInt32LE(36+n*2,4); b.write('WAVEfmt ',8); b.writeUInt32LE(16,16); b.writeUInt16LE(1,20); b.writeUInt16LE(1,22);
+  b.writeUInt32LE(sr,24); b.writeUInt32LE(sr*2,28); b.writeUInt16LE(2,32); b.writeUInt16LE(16,34); b.write('data',36); b.writeUInt32LE(n*2,40);
+  for (let i=0;i<n;i++) b.writeInt16LE(Math.round(32767*Math.max(-1, Math.min(1, x[i]))), 44+i*2);
+  fs.writeFileSync(HUMWAV, b); }
+// note-ons in a format-0 MIDI file: [tick, pitch]
+function midiNotes(b){
+  const ons = []; let o = 22, tick = 0, run = 0; const end = 22 + b.readUInt32BE(18);
+  const vlq = () => { let v = 0, c; do { c = b[o++]; v = (v << 7) | (c & 127); } while (c & 128); return v; };
+  while (o < end){ tick += vlq(); let st = b[o];
+    if (st === 0xFF){ o += 2; const len = vlq(); o += len; continue; }
+    if (st & 0x80){ run = st; o++; } st = run; const p = b[o++], v = b[o++];
+    if ((st & 0xF0) === 0x90 && v > 0) ons.push([tick, p]); }
+  return ons;
+}
 
 try {
   // ============ 1. start, controls, MIDI-learn, presets, export, import, mic ============
@@ -235,6 +254,49 @@ try {
       && Math.abs(got.pitch - 0.5) < 1e-6 && got.window === 1 && got.density === 24);
     const refused = await page.evaluate(() => { try { window.__grv.applySeedFile({ hello:'world' }); return false; } catch (e) { return true; } });
     R('a file that is not a seed is refused', refused);
+    await page.close();
+  }
+
+  section('hum → MIDI');
+  {
+    const page = await openPage();
+    const cdp = await page.createCDPSession(); await cdp.send('Browser.setDownloadBehavior', { behavior:'allow', downloadPath:TMP });
+    await page.click('#enter'); await sleep(1500);
+    await page.click('#humBtn'); await sleep(400);
+    const st = await stats(page);
+    R('opening Hum → MIDI pauses the cloud', await page.$eval('#hum', e => e.classList.contains('open')) && !st.playing);
+    R('empty piano roll explains what to do', await page.$eval('#humEmpty', e => !e.hidden) && await page.$eval('#humSave', e => e.disabled));
+    await page.$eval('#humClick', e => { e.checked = false; });
+    await page.$eval('#humKey', e => { e.value = 'none'; e.dispatchEvent(new Event('change')); });
+    await (await page.$('#humFile')).uploadFile(HUMWAV); await sleep(1500);
+    const info = await text(page, '#humInfo');
+    R('imported hum becomes notes', /^5 notes/.test(info), info);
+    R('tempo is detected from the take', Math.abs(await page.$eval('#humBpm', e => +e.value) - 120) < 3 || Math.abs(await page.$eval('#humBpm', e => +e.value) - 240) < 6, await page.$eval('#humBpm', e => e.value) + ' BPM');
+    const ink = await page.$eval('#humRoll', c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; });
+    R('piano roll draws the notes', ink > 2000 && await page.$eval('#humEmpty', e => e.hidden), ink + ' px');
+    await page.$eval('#humBpm', e => { e.value = 120; e.dispatchEvent(new Event('change')); });
+    await page.$eval('#humGrid', e => { e.value = '8'; e.dispatchEvent(new Event('change')); });
+    await page.click('#humSave'); await sleep(800);
+    const mid = fs.readdirSync(TMP).find(f => f.endsWith('.mid'));
+    const ons = mid ? midiNotes(fs.readFileSync(path.join(TMP, mid))) : [];
+    R('Download .mid saves a MIDI file', !!mid && fs.readFileSync(path.join(TMP, mid)).subarray(0, 4).toString() === 'MThd', mid || 'none');
+    R('the file has the hummed notes, on 8ths from bar 1', JSON.stringify(ons) === JSON.stringify(HUM_NOTES.map((p, k) => [k*240, p])), JSON.stringify(ons));
+    await page.$eval('#humOct', e => { e.value = '-1'; e.dispatchEvent(new Event('change')); });
+    const low = await page.evaluate(() => HUM.out.notes.map(n => n.pitch));
+    R('octave −1 shifts every note down 12', JSON.stringify(low) === JSON.stringify(HUM_NOTES.map(p => p - 12)));
+    R('drag chip carries the file for Chrome to write', await page.$eval('#humDrag', e => e.getAttribute('aria-disabled') === 'false' && e.href.startsWith('data:audio/midi;base64,') && e.download.endsWith('.mid')));
+    await page.click('#humPlay'); await sleep(500);
+    R('Preview plays and stops', await text(page, '#humPlay') === '■ Stop');
+    await page.click('#humPlay'); R('Preview stops on demand', await text(page, '#humPlay') === '▶ Preview');
+    // the fake mic: record with the click and count-in, then stop
+    await page.$eval('#humClick', e => { e.checked = true; });
+    await page.click('#humRec'); await sleep(3500);
+    R('recording shows a running timer', /^■ Stop 0:0[2-3]$/.test(await text(page, '#humRec')), await text(page, '#humRec'));
+    await page.click('#humRec'); await sleep(1500);
+    R('a mic take with the click is analysed from bar 1', await text(page, '#humSrc') === 'mic take · ' + (await page.evaluate(() => (HUM.x.length/HUM.sr).toFixed(1))) + ' s'
+      && await page.evaluate(() => !!HUM.countIn && HUM.countIn.start > 0.9) && await text(page, '#humRec') === '● Record');
+    await page.keyboard.press('Escape'); await sleep(300);
+    R('Esc closes Hum → MIDI', await page.$eval('#hum', e => !e.classList.contains('open')));
     await page.close();
   }
 
