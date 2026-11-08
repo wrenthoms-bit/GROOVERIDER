@@ -5,9 +5,10 @@ Checks for `docs/index.html`. They live outside `docs/` so they are not publishe
 ```bash
 cd webtests
 node engine.test.mjs      # engine only: needs Node, nothing else
+node a2m.test.mjs         # Hum → MIDI analysis: needs Node, nothing else
 npm install               # once, for the browser checks
 node browser.test.mjs     # needs Google Chrome installed
-npm test                  # both
+npm test                  # all three
 ```
 
 Exit code 0 means every check passed.
@@ -29,11 +30,26 @@ Runs the page's `ObservatoryEngine` class in Node against the real `core/groover
 
 If a change to `core/` alters these numbers, it has changed the sound, on the web and on the phone alike. Remember that the page uses the copy of the wasm embedded in `index.html`: after changing `core/`, run `../core/reinline.sh`.
 
+## a2m.test.mjs
+
+Runs the Hum → MIDI analysis (`A2M`, between the `A2M-BEGIN` and `A2M-END` markers in `docs/index.html`) in Node. The takes are synthesised from a known melody — voice-like harmonics, vibrato, scoops and slides, breath noise, phone-mic level — so the right answer is known.
+
+| Area | Check |
+|---|---|
+| Notes | a detached hummed line: every note at the right pitch, onsets within 35 ms |
+| Slides | a legato line with slides gives one note per pitch, not a run of blips |
+| Repeats | the same pitch re-sung with a dip in level gives separate notes |
+| Range and level | C2 to C6; a very quiet take; silence and white noise give nothing; 44.1 kHz input |
+| Tempo, key, quantise | tempo found (or its half), key found (or its relative), every note on its 1/16 step, no overlaps |
+| MIDI file | reads back with the same header, tempo and notes |
+
+`A2M_WAV=/path/to/take.wav node a2m.test.mjs` also prints what a real 16-bit WAV take turns into.
+
 ## browser.test.mjs
 
 Drives the real page in headless Chrome. It serves `docs/` on a local port itself.
 
-It covers: auto-play of the default preset, ring and pad controls, MIDI-learn, all presets, WAV export with its tail, import, mic recording, MIDI keyboard playing (latch, gate, sustain), the sample library menu, the help panel and start-screen tips, the Canvas2D fallback, and seed files (loading one in the phone app's format, save and load round trip, a plain-engine seed, a file that is not a seed).
+It covers: auto-play of the default preset, ring and pad controls, MIDI-learn, all presets, WAV export with its tail, import, mic recording, MIDI keyboard playing (latch, gate, sustain), the sample library menu, the help panel and start-screen tips, Hum → MIDI (import, piano roll, the downloaded file's notes, octave, preview, a mic take with the count-in), the Canvas2D fallback, and seed files (loading one in the phone app's format, save and load round trip, a plain-engine seed, a file that is not a seed).
 
 What it does **not** prove: MIDI devices, the microphone and the iPhone are simulated. It checks the page's own logic, not real hardware, real Safari, or how anything sounds.
 
