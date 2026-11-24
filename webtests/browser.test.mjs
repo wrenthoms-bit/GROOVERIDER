@@ -257,6 +257,49 @@ try {
     await page.close();
   }
 
+  section('longer renders');
+  {
+    const page = await openPage();
+    const cdp = await page.createCDPSession(); await cdp.send('Browser.setDownloadBehavior', { behavior:'allow', downloadPath:TMP });
+    await page.click('#enter'); await sleep(2500);
+    const readWav = f => { const b = fs.readFileSync(path.join(TMP, f)), ch = b.readUInt16LE(22), sr = b.readUInt32LE(24), n = (b.length-44)/4/ch;
+      return { sr, ch, n, fl: new Float32Array(b.buffer.slice(b.byteOffset+44, b.byteOffset+44+n*ch*4)) }; };
+    // a WAV that was not in the download folder before the click (earlier sections leave theirs there)
+    const waitWav = async (pre, seen) => { for (let i=0; i<240; i++){ const f = fs.readdirSync(TMP).find(n => n.startsWith(pre) && n.endsWith('.wav') && !seen.includes(n) && !n.endsWith('.crdownload'));
+      if (f){ await sleep(1500); return f; } await sleep(500); } return null; };
+    const setLen = (secs, end) => page.evaluate((secs, end) => { const l = document.getElementById('renderLen'), e = document.getElementById('renderEnd');
+      l.value = secs; l.dispatchEvent(new Event('change')); e.value = end; e.dispatchEvent(new Event('change')); }, secs, end);
+    await setLen(9999, 'ring');
+    R('length is capped at 10 minutes', await page.$eval('#renderLen', e => +e.value) === 600);
+    // exact length: precisely 45 s, fading to silence
+    await setLen(45, 'exact'); let seen = fs.readdirSync(TMP), t = Date.now(); await page.click('#export');
+    let f = await waitWav('GR_', seen); let secs = (Date.now() - t)/1000;
+    if (f){ const w = readWav(f); let nan = 0, endPk = 0, midPk = 0;
+      for (let i = 0; i < w.fl.length; i++){ const v = w.fl[i]; if (!Number.isFinite(v)) nan++; }
+      for (let i = (w.n - 10)*w.ch; i < w.n*w.ch; i++) endPk = Math.max(endPk, Math.abs(w.fl[i]));
+      for (let i = 20*w.sr*w.ch; i < 21*w.sr*w.ch; i++) midPk = Math.max(midPk, Math.abs(w.fl[i]));
+      R('exact length: the file is exactly 45 s', w.n === 45*w.sr && /_45s_exact\.wav$/.test(f), `${f}, ${(w.n/w.sr).toFixed(3)} s`);
+      R('exact length: it plays throughout and fades to silence', nan === 0 && midPk > 0.01 && endPk < 0.001, `mid peak ${midPk.toFixed(3)}, last samples ${endPk.toExponential(1)}`);
+      R('45 s renders quickly', secs < 30, `${secs.toFixed(1)} s`);
+      R('status says exactly', /Rendered exactly 45 s/.test(await text(page, '#status')));
+      fs.rmSync(path.join(TMP, f));
+    } else R('exact length: the file is exactly 45 s', false, await text(page, '#status'));
+    // ring out: 2 minutes, then the tail
+    await setLen(120, 'ring'); seen = fs.readdirSync(TMP); t = Date.now(); await page.click('#export');
+    f = await waitWav('GR_', seen); secs = (Date.now() - t)/1000;
+    if (f){ const w = readWav(f), dur = w.n/w.sr;
+      R('ring out: 2 min plus the FX tail', dur > 121 && dur <= 140 && /_120s\.wav$/.test(f), `${dur.toFixed(1)} s in ${secs.toFixed(1)} s`);
+      R('status says the length in minutes', /Rendered 2:00 min \+/.test(await text(page, '#status')), await text(page, '#status'));
+      fs.rmSync(path.join(TMP, f));
+    } else R('ring out: 2 min plus the FX tail', false, await text(page, '#status'));
+    R('render settings are remembered', (await page.evaluate(() => localStorage.getItem('grvr.render.v1'))) === '{"secs":120,"end":"ring"}');
+    await page.close();
+    const phone = await openPage({ device:'iPhone 13', fakeMidi:false });
+    await phone.evaluate(() => { const l = document.getElementById('renderLen'); l.value = 600; l.dispatchEvent(new Event('change')); });
+    R('phones are capped at 3 minutes', await phone.$eval('#renderLen', e => +e.value) === 180);
+    await phone.close();
+  }
+
   section('hum → MIDI');
   {
     const page = await openPage();

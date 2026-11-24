@@ -18,7 +18,7 @@ Live at **https://grooverider.delrogue.com** (GitHub Pages) and https://grooveri
    - **DRONE** holds one spot and lets it evolve. **KEY** and **SCALE** keep it in tune (key assumes the source is in C).
    - **Detail** opens the fine controls: shimmer, tone, register, scan and more.
 4. The menu under the title switches **presets**; "Standing Room Only" is the default. **Re-roll** gives a new variation with the same settings. **Save** and **Load** beside it keep a sound as a seed file (`.grvr`); the phone app reads and writes the same files.
-5. **Render WAV** exports 8 seconds plus the reverb tail as a 32-bit float file.
+5. **Render WAV** exports a 32-bit float file: 8 seconds plus the reverb tail by default. **Detail → Render WAV** sets the length (up to 10 minutes on a computer, 3 on phones and tablets) and the ending: **Ring out** adds the tail after the length; **Exact length** makes the file exactly that long with a 1.5 s fade, to fit a video or animation timeline. It renders offline at about 30× real time, so even long files take seconds; each second is about 0.4 MB.
 
 **? Help** in the top bar has all of this in the page, plus what to check if there is no sound (on iPhone and iPad, the silent switch mutes browser audio).
 

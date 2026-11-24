@@ -191,6 +191,7 @@ input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:3
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; appearance:none; width:13px; height:13px; border-radius:50%; background:var(--amber); border:2px solid var(--ink); box-shadow:0 0 10px rgba(232,168,87,.5); cursor:pointer}
 input[type=range]::-moz-range-thumb{width:11px; height:11px; border-radius:50%; background:var(--amber); border:2px solid var(--ink); cursor:pointer}
 .hint{font-size:11px; color:var(--tx2); line-height:1.5}
+.drawer input[type=number]{width:72px; font:12px var(--mono); color:var(--tx); background:var(--glass); border:1px solid var(--line2); border-radius:6px; padding:4px 6px}
 .cc-badge{font:8.5px var(--mono); color:var(--tx3); border:1px solid var(--line2); border-radius:4px; padding:1px 5px; cursor:default; letter-spacing:.04em; user-select:none; display:none; background:rgba(3,6,7,.6)}
 body.learn .cc-badge,.cc-badge.bound{display:inline-block}
 body.learn .cc-badge{cursor:pointer; color:var(--cyan); border-color:var(--cyan)}
@@ -292,6 +293,12 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
   <h3>Grain</h3><div id="detailGrain"></div>
   <h3>Space</h3><div id="detailSpace"></div>
   <h3>Output</h3><div id="detailOut"></div>
+  <h3>Render WAV</h3>
+  <div>
+    <div class="row"><label for="renderLen">Length (s)</label><input type="number" id="renderLen" min="1" max="600" step="0.5" value="8"></div>
+    <div class="row"><label for="renderEnd">Ending</label><select id="renderEnd" style="width:auto"><option value="ring">Ring out (adds the tail)</option><option value="exact">Exact length (fades)</option></select></div>
+    <div class="hint" id="renderHint">Ring out lets the reverb fade after the length. Exact length fits a video or animation timeline.</div>
+  </div>
   <h3>MIDI keyboard</h3>
   <div>
     <div class="row"><label for="keysMode">Keys</label><select id="keysMode" style="width:auto"><option value="latch">Latch chord</option><option value="gate">Gate (while held)</option><option value="off">Off</option></select></div>
@@ -342,7 +349,7 @@ body.learn button.learnable{outline:1px dashed var(--cyan); outline-offset:2px}
         <ul>
           <li><b>Rings:</b> drag up or down, scroll, or use the arrow keys. Hold <kbd>Shift</kbd> for fine steps. Double-click returns to the preset value.</li>
           <li><kbd>Space</kbd> plays and stops. <kbd>Esc</kbd> closes panels.</li>
-          <li><b>Render WAV</b> saves 8 seconds plus the reverb tail to your downloads.</li>
+          <li><b>Render WAV</b> saves 8 seconds plus the reverb tail to your downloads. Set a longer length (up to 10 minutes), or an exact length for video and animation, in <b>Detail → Render WAV</b>.</li>
         </ul>
       </section>
       <section>
@@ -1017,16 +1024,17 @@ function encodeWavFloat32(chans, sampleRate){
   return new Blob([buf], {type:'audio/wav'});
 }
 // A second engine instance, same class as the live one, driven with the same state + seed.
-// 3 s pre-roll (discarded) so the space is already blooming, EXPORT_SECS of playing, then
-// grains stop and the reverb/shimmer tail rings out (to -60 dB, 20 s max, faded).
-async function renderOffline(src, state, seed, sr, onProgress, notes){
+// 3 s pre-roll (discarded) so the space is already blooming, `secs` of playing, then either
+// grains stop and the reverb/shimmer tail rings out (to -60 dB, 20 s max, faded), or, with
+// `exact`, the file is exactly `secs` long and fades out over its last 1.5 s.
+async function renderOffline(src, state, seed, sr, onProgress, notes, secs = EXPORT_SECS, exact = false){
   const { instance } = await WebAssembly.instantiate(wasmBytes, {});
   const eng = new ObservatoryEngine(instance, sr);
   eng.setSeed(seed[0], seed[1]); eng.setNotes(notes || []);
   const p = Object.assign({}, state, {playing:1});
   eng.setState(p, true);
   eng.setSource(src.l, src.r, src.frames, src.channels, p.position);
-  const F = 128, pre = Math.round(3*sr), body = Math.round(EXPORT_SECS*sr), maxTail = Math.round(20*sr);
+  const F = 128, pre = Math.round(3*sr), body = Math.round(secs*sr), maxTail = exact ? 0 : Math.round(20*sr);
   const L = new Float32Array(body+maxTail), R = new Float32Array(body+maxTail), bl = new Float32Array(F), br = new Float32Array(F);
   let last = performance.now();
   const breathe = async frac => { if (performance.now()-last > 24){ onProgress && onProgress(frac);
@@ -1040,23 +1048,43 @@ async function renderOffline(src, state, seed, sr, onProgress, notes){
     if (w > body + 0.25*sr){ quiet = eng.takePeak() < 0.001 ? quiet+n : 0; if (quiet > 0.4*sr) break; }
     await breathe(0.1 + 0.9*w/(body+maxTail));
   }
-  const fin = Math.min(Math.round(0.02*sr), w), fout = Math.min(Math.round(1.5*sr), w-body);
+  const fin = Math.min(Math.round(0.02*sr), w), fout = exact ? Math.min(Math.round(1.5*sr), Math.round(w/4)) : Math.min(Math.round(1.5*sr), w-body);
   for (let i=0;i<fin;i++){ const g=i/fin; L[i]*=g; R[i]*=g; }
   for (let i=0;i<fout;i++){ const g=i/fout, k=w-1-i, q=g*g*(3-2*g); L[k]*=q; R[k]*=q; }
   return { l:L.subarray(0,w), r:R.subarray(0,w), sr, tail:(w-body)/sr };
 }
+// Length and ending live in Detail → Render WAV. Long renders are cheap (the engine runs ~30× real
+// time) but a 32-bit stereo WAV is ~0.4 MB a second, built in memory: phones get a lower cap.
+const MAX_RENDER = (IS_IOS || /Android|Mobile/.test(navigator.userAgent)) ? 180 : 600;
+const RENDER_PREFS = 'grvr.render.v1';
+$('renderLen').max = MAX_RENDER;
+try { const p = JSON.parse(localStorage.getItem(RENDER_PREFS) || '{}');
+  if (p.secs) $('renderLen').value = p.secs; if (p.end) $('renderEnd').value = p.end; } catch(e){}
+const renderSecs = () => clamp(Math.round((+$('renderLen').value || EXPORT_SECS)*2)/2, 1, MAX_RENDER);
+const fmtSecs = s => s < 60 ? s+' s' : Math.floor(s/60)+':'+(s%60 < 10 ? '0' : '')+(s%60)+' min';
+function renderLenChanged(){
+  const s = renderSecs(); $('renderLen').value = s;
+  try { localStorage.setItem(RENDER_PREFS, JSON.stringify({ secs:s, end:$('renderEnd').value })); } catch(e){}
+  $('export').title = 'Render '+fmtSecs(s)+($('renderEnd').value==='exact' ? ', exact length' : ' plus the reverb tail')+'. Change it in Detail.';
+  $('renderHint').textContent = (s >= 60 ? 'About '+Math.round(s*0.384)+' MB. ' : '')
+    + 'Ring out lets the reverb fade after the length. Exact length fits a video or animation timeline. Up to '+MAX_RENDER/60+' min here.';
+}
+$('renderLen').addEventListener('change', renderLenChanged);
+$('renderEnd').addEventListener('change', renderLenChanged);
+renderLenChanged();
 $('export').addEventListener('click', async ()=>{
   if (!curSource){ setStatus('Load a source first.'); return; }
   $('export').disabled = true;
+  const secs = renderSecs(), exact = $('renderEnd').value === 'exact';
   try {
     const out = await renderOffline(curSource, effective(), [seedLo, seedHi], ctx.sampleRate,
-      f => { $('export').textContent = 'Rendering '+Math.round(f*100)+'%'; }, chord.map(n=>n-60));
+      f => { $('export').textContent = 'Rendering '+Math.round(f*100)+'%'; }, chord.map(n=>n-60), secs, exact);
     const url = URL.createObjectURL(encodeWavFloat32([out.l, out.r], out.sr));
     const nm = currentName().replace(/[^A-Za-z0-9]+/g,'');
-    const a = document.createElement('a'); a.href = url; a.download = 'GR_'+nm+'_'+EXPORT_SECS+'s.wav';
+    const a = document.createElement('a'); a.href = url; a.download = 'GR_'+nm+'_'+String(secs).replace('.', '_')+'s'+(exact ? '_exact' : '')+'.wav';
     document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url), 8000);
-    setStatus('Rendered '+EXPORT_SECS+' s + '+out.tail.toFixed(1)+' s FX tail — check your downloads.');
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    setStatus((exact ? 'Rendered exactly '+fmtSecs(secs) : 'Rendered '+fmtSecs(secs)+' + '+out.tail.toFixed(1)+' s FX tail')+' — check your downloads.');
   } catch(err){ setStatus('Render failed: '+(err && err.message || err)); }
   $('export').textContent = 'Render WAV'; $('export').disabled = false;
 });
