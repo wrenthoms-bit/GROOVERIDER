@@ -33,7 +33,7 @@ Turns a hummed, sung or whistled line into a MIDI file for a DAW. Click **Hum â†
    - **Key** and **Scale:** As sung, Auto (detected), or a key you choose. Snapping uses the pitch you actually sang, so a flat note goes to the nearest note in the scale.
    - **Octave:** hums sit low; âˆ’1 for a bassline, +1 for a lead.
    - **Sensitivity** catches quieter notes; **Simplify** drops notes shorter than its value.
-4. **Download .mid**, or in Chrome/Edge drag **Drag to DAW** straight onto a track in Logic.
+4. **Download .mid** saves the file to your downloads. In Chrome or Edge on a computer, **Drag to DAW** skips that step: hold it and drag it onto a track in Logic (clicking it only explains this). Other browsers show just Download .mid.
 
 The file is a standard MIDI file (format 0, 480 ticks per beat, channel 1). DAWs place the notes by beat, so a line hummed at 166 BPM fits a project at any tempo.
 
